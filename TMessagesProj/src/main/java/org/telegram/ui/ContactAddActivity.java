@@ -1,9 +1,9 @@
 /*
- * This is the source code of Telegram for Android v. 1.3.2.
+ * This is the source code of Telegram for Android v. 3.x.x.
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013.
+ * Copyright Nikolai Kudashov, 2013-2016.
  */
 
 package org.telegram.ui;
@@ -17,7 +17,6 @@ import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
-import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
@@ -27,20 +26,21 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import org.telegram.android.AndroidUtilities;
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.PhoneFormat.PhoneFormat;
-import org.telegram.android.ContactsController;
-import org.telegram.android.LocaleController;
+import org.telegram.messenger.ContactsController;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.ApplicationLoader;
-import org.telegram.messenger.TLRPC;
-import org.telegram.android.MessagesController;
-import org.telegram.android.NotificationCenter;
+import org.telegram.tgnet.TLRPC;
+import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.Components.LayoutHelper;
 
 public class ContactAddActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
 
@@ -78,7 +78,7 @@ public class ContactAddActivity extends BaseFragment implements NotificationCent
     }
 
     @Override
-    public View createView(Context context, LayoutInflater inflater) {
+    public View createView(Context context) {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
         if (addContact) {
@@ -98,6 +98,8 @@ public class ContactAddActivity extends BaseFragment implements NotificationCent
                         user.last_name = lastNameField.getText().toString();
                         ContactsController.getInstance().addContact(user);
                         finishFragment();
+                        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("Notifications", Activity.MODE_PRIVATE);
+                        preferences.edit().putInt("spam3_" + user_id, 1).commit();
                         NotificationCenter.getInstance().postNotificationName(NotificationCenter.updateInterfaces, MessagesController.UPDATE_MASK_NAME);
                     }
                 }
@@ -129,8 +131,8 @@ public class ContactAddActivity extends BaseFragment implements NotificationCent
         layoutParams.topMargin = AndroidUtilities.dp(24);
         layoutParams.leftMargin = AndroidUtilities.dp(24);
         layoutParams.rightMargin = AndroidUtilities.dp(24);
-        layoutParams.width = LinearLayout.LayoutParams.MATCH_PARENT;
-        layoutParams.height = LinearLayout.LayoutParams.WRAP_CONTENT;
+        layoutParams.width = LayoutHelper.MATCH_PARENT;
+        layoutParams.height = LayoutHelper.WRAP_CONTENT;
         frameLayout.setLayoutParams(layoutParams);
 
         avatarImage = new BackupImageView(context);
@@ -153,8 +155,8 @@ public class ContactAddActivity extends BaseFragment implements NotificationCent
         nameTextView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
         frameLayout.addView(nameTextView);
         layoutParams3 = (FrameLayout.LayoutParams) nameTextView.getLayoutParams();
-        layoutParams3.width = FrameLayout.LayoutParams.WRAP_CONTENT;
-        layoutParams3.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+        layoutParams3.width = LayoutHelper.WRAP_CONTENT;
+        layoutParams3.height = LayoutHelper.WRAP_CONTENT;
         layoutParams3.leftMargin = AndroidUtilities.dp(LocaleController.isRTL ? 0 : 80);
         layoutParams3.rightMargin = AndroidUtilities.dp(LocaleController.isRTL ? 80 : 0);
         layoutParams3.topMargin = AndroidUtilities.dp(3);
@@ -171,8 +173,8 @@ public class ContactAddActivity extends BaseFragment implements NotificationCent
         onlineTextView.setGravity((LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT));
         frameLayout.addView(onlineTextView);
         layoutParams3 = (FrameLayout.LayoutParams) onlineTextView.getLayoutParams();
-        layoutParams3.width = FrameLayout.LayoutParams.WRAP_CONTENT;
-        layoutParams3.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+        layoutParams3.width = LayoutHelper.WRAP_CONTENT;
+        layoutParams3.height = LayoutHelper.WRAP_CONTENT;
         layoutParams3.leftMargin = AndroidUtilities.dp(LocaleController.isRTL ? 0 : 80);
         layoutParams3.rightMargin = AndroidUtilities.dp(LocaleController.isRTL ? 80 : 0);
         layoutParams3.topMargin = AndroidUtilities.dp(32);
@@ -197,7 +199,7 @@ public class ContactAddActivity extends BaseFragment implements NotificationCent
         layoutParams.height = AndroidUtilities.dp(36);
         layoutParams.leftMargin = AndroidUtilities.dp(24);
         layoutParams.rightMargin = AndroidUtilities.dp(24);
-        layoutParams.width = LinearLayout.LayoutParams.MATCH_PARENT;
+        layoutParams.width = LayoutHelper.MATCH_PARENT;
         firstNameField.setLayoutParams(layoutParams);
         firstNameField.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
@@ -229,7 +231,7 @@ public class ContactAddActivity extends BaseFragment implements NotificationCent
         layoutParams.height = AndroidUtilities.dp(36);
         layoutParams.leftMargin = AndroidUtilities.dp(24);
         layoutParams.rightMargin = AndroidUtilities.dp(24);
-        layoutParams.width = LinearLayout.LayoutParams.MATCH_PARENT;
+        layoutParams.width = LayoutHelper.MATCH_PARENT;
         lastNameField.setLayoutParams(layoutParams);
         lastNameField.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
@@ -297,8 +299,10 @@ public class ContactAddActivity extends BaseFragment implements NotificationCent
     }
 
     @Override
-    public void onOpenAnimationEnd() {
-        firstNameField.requestFocus();
-        AndroidUtilities.showKeyboard(firstNameField);
+    public void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
+        if (isOpen) {
+            firstNameField.requestFocus();
+            AndroidUtilities.showKeyboard(firstNameField);
+        }
     }
 }

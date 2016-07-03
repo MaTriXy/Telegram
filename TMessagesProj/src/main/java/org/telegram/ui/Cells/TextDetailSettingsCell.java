@@ -1,9 +1,9 @@
 /*
- * This is the source code of Telegram for Android v. 1.7.x.
+ * This is the source code of Telegram for Android v. 3.x.x.
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2014.
+ * Copyright Nikolai Kudashov, 2013-2016.
  */
 
 package org.telegram.ui.Cells;
@@ -13,13 +13,14 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 
-import org.telegram.android.AndroidUtilities;
-import org.telegram.android.LocaleController;
-import org.telegram.ui.Components.FrameLayoutFixed;
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
+import org.telegram.ui.Components.LayoutHelper;
 
-public class TextDetailSettingsCell extends FrameLayoutFixed {
+public class TextDetailSettingsCell extends FrameLayout {
 
     private TextView textView;
     private TextView valueTextView;
@@ -43,15 +44,7 @@ public class TextDetailSettingsCell extends FrameLayoutFixed {
         textView.setMaxLines(1);
         textView.setSingleLine(true);
         textView.setGravity((LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.CENTER_VERTICAL);
-        addView(textView);
-        LayoutParams layoutParams = (LayoutParams) textView.getLayoutParams();
-        layoutParams.width = LayoutParams.WRAP_CONTENT;
-        layoutParams.height = LayoutParams.WRAP_CONTENT;
-        layoutParams.topMargin = AndroidUtilities.dp(10);
-        layoutParams.leftMargin = AndroidUtilities.dp(17);
-        layoutParams.rightMargin = AndroidUtilities.dp(17);
-        layoutParams.gravity = LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT;
-        textView.setLayoutParams(layoutParams);
+        addView(textView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.TOP, 17, 10, 17, 0));
 
         valueTextView = new TextView(context);
         valueTextView.setTextColor(0xff8a8a8a);
@@ -61,15 +54,7 @@ public class TextDetailSettingsCell extends FrameLayoutFixed {
         valueTextView.setMaxLines(1);
         valueTextView.setSingleLine(true);
         valueTextView.setPadding(0, 0, 0, 0);
-        addView(valueTextView);
-        layoutParams = (LayoutParams) valueTextView.getLayoutParams();
-        layoutParams.width = LayoutParams.WRAP_CONTENT;
-        layoutParams.height = LayoutParams.WRAP_CONTENT;
-        layoutParams.topMargin = AndroidUtilities.dp(35);
-        layoutParams.leftMargin = AndroidUtilities.dp(17);
-        layoutParams.rightMargin = AndroidUtilities.dp(17);
-        layoutParams.gravity = LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT;
-        valueTextView.setLayoutParams(layoutParams);
+        addView(valueTextView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.TOP, 17, 35, 17, 0));
     }
 
     @Override

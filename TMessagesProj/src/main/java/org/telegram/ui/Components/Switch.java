@@ -16,6 +16,8 @@
 
 package org.telegram.ui.Components;
 
+import android.animation.ObjectAnimator;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.PorterDuff;
@@ -30,10 +32,9 @@ import android.view.VelocityTracker;
 import android.view.ViewConfiguration;
 import android.widget.CompoundButton;
 
-import org.telegram.android.AndroidUtilities;
-import org.telegram.android.LocaleController;
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
-import org.telegram.ui.AnimationCompat.ObjectAnimatorProxy;
 
 public class Switch extends CompoundButton {
 
@@ -89,7 +90,7 @@ public class Switch extends CompoundButton {
     private int mSwitchRight;
     private int mSwitchBottom;
 
-    private ObjectAnimatorProxy mPositionAnimator;
+    private ObjectAnimator mPositionAnimator;
 
     private final Rect mTempRect = new Rect();
 
@@ -160,10 +161,6 @@ public class Switch extends CompoundButton {
         requestLayout();
     }
 
-    public void setTrackResource(int resId) {
-        setTrackDrawable(getContext().getDrawable(resId));
-    }
-
     public Drawable getTrackDrawable() {
         return mTrackDrawable;
     }
@@ -177,10 +174,6 @@ public class Switch extends CompoundButton {
             thumb.setCallback(this);
         }
         requestLayout();
-    }
-
-    public void setThumbResource(int resId) {
-        setThumbDrawable(getContext().getDrawable(resId));
     }
 
     public Drawable getThumbDrawable() {
@@ -358,7 +351,7 @@ public class Switch extends CompoundButton {
 
     private void animateThumbToCheckedState(boolean newCheckedState) {
         final float targetPosition = newCheckedState ? 1 : 0;
-        mPositionAnimator = ObjectAnimatorProxy.ofFloatProxy(this, "thumbPosition", targetPosition);
+        mPositionAnimator = ObjectAnimator.ofFloat(this, "thumbPosition", targetPosition);
         mPositionAnimator.setDuration(THUMB_ANIMATION_DURATION);
         mPositionAnimator.start();
     }
@@ -391,6 +384,7 @@ public class Switch extends CompoundButton {
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         attachedToWindow = true;
+        requestLayout();
     }
 
     @Override
@@ -555,8 +549,6 @@ public class Switch extends CompoundButton {
 
         final int switchTop = mSwitchTop;
         final int switchBottom = mSwitchBottom;
-        final int switchInnerTop = switchTop + padding.top;
-        final int switchInnerBottom = switchBottom - padding.bottom;
 
         final Drawable thumbDrawable = mThumbDrawable;
         if (trackDrawable != null) {
@@ -654,6 +646,7 @@ public class Switch extends CompoundButton {
         invalidate();
     }
 
+    @SuppressLint("NewApi")
     @Override
     public void drawableHotspotChanged(float x, float y) {
         super.drawableHotspotChanged(x, y);

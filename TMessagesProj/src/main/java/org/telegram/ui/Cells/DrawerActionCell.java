@@ -1,9 +1,9 @@
 /*
- * This is the source code of Telegram for Android v. 1.7.x.
+ * This is the source code of Telegram for Android v. 3.x.x.
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2014.
+ * Copyright Nikolai Kudashov, 2013-2016.
  */
 
 package org.telegram.ui.Cells;
@@ -14,7 +14,9 @@ import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
-import org.telegram.android.AndroidUtilities;
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLog;
+import org.telegram.ui.Components.LayoutHelper;
 
 public class DrawerActionCell extends FrameLayout {
 
@@ -32,14 +34,7 @@ public class DrawerActionCell extends FrameLayout {
         textView.setSingleLine(true);
         textView.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         textView.setCompoundDrawablePadding(AndroidUtilities.dp(34));
-        addView(textView);
-        LayoutParams layoutParams = (LayoutParams) textView.getLayoutParams();
-        layoutParams.width = LayoutParams.MATCH_PARENT;
-        layoutParams.height = LayoutParams.MATCH_PARENT;
-        layoutParams.gravity = Gravity.LEFT;
-        layoutParams.leftMargin = AndroidUtilities.dp(14);
-        layoutParams.rightMargin = AndroidUtilities.dp(16);
-        textView.setLayoutParams(layoutParams);
+        addView(textView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.LEFT | Gravity.TOP, 14, 0, 16, 0));
     }
 
     @Override
@@ -48,7 +43,11 @@ public class DrawerActionCell extends FrameLayout {
     }
 
     public void setTextAndIcon(String text, int resId) {
-        textView.setText(text);
-        textView.setCompoundDrawablesWithIntrinsicBounds(resId, 0, 0, 0);
+        try {
+            textView.setText(text);
+            textView.setCompoundDrawablesWithIntrinsicBounds(resId, 0, 0, 0);
+        } catch (Throwable e) {
+            FileLog.e("tmessages", e);
+        }
     }
 }

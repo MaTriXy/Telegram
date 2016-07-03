@@ -1,17 +1,15 @@
 /*
- * This is the source code of Telegram for Android v. 1.3.2.
+ * This is the source code of Telegram for Android v. 3.x.x.
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013.
+ * Copyright Nikolai Kudashov, 2013-2016.
  */
 
 package org.telegram.ui;
 
 import android.content.Context;
-import android.os.Build;
 import android.view.Gravity;
-import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.AbsListView;
@@ -22,8 +20,8 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
-import org.telegram.android.AndroidUtilities;
-import org.telegram.android.LocaleController;
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.ui.Adapters.CountryAdapter;
 import org.telegram.ui.Adapters.CountryAdapter.Country;
@@ -32,6 +30,7 @@ import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.LetterSectionsListView;
 
 public class CountrySelectActivity extends BaseFragment {
@@ -61,7 +60,7 @@ public class CountrySelectActivity extends BaseFragment {
     }
 
     @Override
-    public View createView(Context context, LayoutInflater inflater) {
+    public View createView(Context context) {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
         actionBar.setTitle(LocaleController.getString("ChooseCountry", R.string.ChooseCountry));
@@ -83,20 +82,16 @@ public class CountrySelectActivity extends BaseFragment {
             }
 
             @Override
-            public boolean onSearchCollapse() {
+            public void onSearchCollapse() {
                 searchListViewAdapter.search(null);
                 searching = false;
                 searchWas = false;
                 listView.setAdapter(listViewAdapter);
-                if (android.os.Build.VERSION.SDK_INT >= 11) {
-                    listView.setFastScrollAlwaysVisible(true);
-                }
+                listView.setFastScrollAlwaysVisible(true);
                 listView.setFastScrollEnabled(true);
                 listView.setVerticalScrollBarEnabled(false);
 
                 emptyTextView.setText(LocaleController.getString("ChooseCountry", R.string.ChooseCountry));
-
-                return true;
             }
 
             @Override
@@ -107,9 +102,7 @@ public class CountrySelectActivity extends BaseFragment {
                     searchWas = true;
                     if (listView != null) {
                         listView.setAdapter(searchListViewAdapter);
-                        if (android.os.Build.VERSION.SDK_INT >= 11) {
-                            listView.setFastScrollAlwaysVisible(false);
-                        }
+                        listView.setFastScrollAlwaysVisible(false);
                         listView.setFastScrollEnabled(false);
                         listView.setVerticalScrollBarEnabled(true);
                     }
@@ -134,8 +127,8 @@ public class CountrySelectActivity extends BaseFragment {
         emptyTextLayout.setOrientation(LinearLayout.VERTICAL);
         ((FrameLayout) fragmentView).addView(emptyTextLayout);
         FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) emptyTextLayout.getLayoutParams();
-        layoutParams.width = FrameLayout.LayoutParams.MATCH_PARENT;
-        layoutParams.height = FrameLayout.LayoutParams.MATCH_PARENT;
+        layoutParams.width = LayoutHelper.MATCH_PARENT;
+        layoutParams.height = LayoutHelper.MATCH_PARENT;
         layoutParams.gravity = Gravity.TOP;
         emptyTextLayout.setLayoutParams(layoutParams);
         emptyTextLayout.setOnTouchListener(new View.OnTouchListener() {
@@ -152,16 +145,16 @@ public class CountrySelectActivity extends BaseFragment {
         emptyTextView.setText(LocaleController.getString("NoResult", R.string.NoResult));
         emptyTextLayout.addView(emptyTextView);
         LinearLayout.LayoutParams layoutParams1 = (LinearLayout.LayoutParams) emptyTextView.getLayoutParams();
-        layoutParams1.width = LinearLayout.LayoutParams.MATCH_PARENT;
-        layoutParams1.height = LinearLayout.LayoutParams.MATCH_PARENT;
+        layoutParams1.width = LayoutHelper.MATCH_PARENT;
+        layoutParams1.height = LayoutHelper.MATCH_PARENT;
         layoutParams1.weight = 0.5f;
         emptyTextView.setLayoutParams(layoutParams1);
 
         FrameLayout frameLayout = new FrameLayout(context);
         emptyTextLayout.addView(frameLayout);
         layoutParams1 = (LinearLayout.LayoutParams) frameLayout.getLayoutParams();
-        layoutParams1.width = LinearLayout.LayoutParams.MATCH_PARENT;
-        layoutParams1.height = LinearLayout.LayoutParams.MATCH_PARENT;
+        layoutParams1.width = LayoutHelper.MATCH_PARENT;
+        layoutParams1.height = LayoutHelper.MATCH_PARENT;
         layoutParams1.weight = 0.5f;
         frameLayout.setLayoutParams(layoutParams1);
 
@@ -173,20 +166,18 @@ public class CountrySelectActivity extends BaseFragment {
         listView.setFastScrollEnabled(true);
         listView.setScrollBarStyle(View.SCROLLBARS_OUTSIDE_OVERLAY);
         listView.setAdapter(listViewAdapter);
-        if (Build.VERSION.SDK_INT >= 11) {
-            listView.setFastScrollAlwaysVisible(true);
-            listView.setVerticalScrollbarPosition(LocaleController.isRTL ? ListView.SCROLLBAR_POSITION_LEFT : ListView.SCROLLBAR_POSITION_RIGHT);
-        }
+        listView.setFastScrollAlwaysVisible(true);
+        listView.setVerticalScrollbarPosition(LocaleController.isRTL ? ListView.SCROLLBAR_POSITION_LEFT : ListView.SCROLLBAR_POSITION_RIGHT);
         ((FrameLayout) fragmentView).addView(listView);
         layoutParams = (FrameLayout.LayoutParams) listView.getLayoutParams();
-        layoutParams.width = FrameLayout.LayoutParams.MATCH_PARENT;
-        layoutParams.height = FrameLayout.LayoutParams.MATCH_PARENT;
+        layoutParams.width = LayoutHelper.MATCH_PARENT;
+        layoutParams.height = LayoutHelper.MATCH_PARENT;
         listView.setLayoutParams(layoutParams);
 
         listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
-                Country country = null;
+                Country country;
                 if (searching && searchWas) {
                     country = searchListViewAdapter.getItem(i);
                 } else {
@@ -200,10 +191,10 @@ public class CountrySelectActivity extends BaseFragment {
                 if (i < 0) {
                     return;
                 }
+                finishFragment();
                 if (country != null && delegate != null) {
                     delegate.didSelectCountry(country.name);
                 }
-                finishFragment();
             }
         });
 

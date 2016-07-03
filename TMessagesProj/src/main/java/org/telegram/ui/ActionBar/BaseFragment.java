@@ -1,30 +1,30 @@
 /*
- * This is the source code of Telegram for Android v. 1.3.2.
+ * This is the source code of Telegram for Android v. 3.x.x.
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013.
+ * Copyright Nikolai Kudashov, 2013-2016.
  */
 
 package org.telegram.ui.ActionBar;
 
+import android.animation.AnimatorSet;
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 
-import org.telegram.messenger.ConnectionsManager;
 import org.telegram.messenger.FileLog;
-import org.telegram.messenger.R;
+import org.telegram.tgnet.ConnectionsManager;
 
 public class BaseFragment {
+
     private boolean isFinished = false;
-    protected AlertDialog visibleDialog = null;
+    protected Dialog visibleDialog = null;
 
     protected View fragmentView;
     protected ActionBarLayout parentLayout;
@@ -43,12 +43,46 @@ public class BaseFragment {
         classGuid = ConnectionsManager.getInstance().generateClassGuid();
     }
 
-    public View createView(Context context, LayoutInflater inflater) {
+    public ActionBar getActionBar() {
+        return actionBar;
+    }
+
+    public View getFragmentView() {
+        return fragmentView;
+    }
+
+    public View createView(Context context) {
         return null;
     }
 
     public Bundle getArguments() {
         return arguments;
+    }
+
+    protected void clearViews() {
+        if (fragmentView != null) {
+            ViewGroup parent = (ViewGroup) fragmentView.getParent();
+            if (parent != null) {
+                try {
+                    parent.removeView(fragmentView);
+                } catch (Exception e) {
+                    FileLog.e("tmessages", e);
+                }
+            }
+            fragmentView = null;
+        }
+        if (actionBar != null) {
+            ViewGroup parent = (ViewGroup) actionBar.getParent();
+            if (parent != null) {
+                try {
+                    parent.removeView(actionBar);
+                } catch (Exception e) {
+                    FileLog.e("tmessages", e);
+                }
+            }
+            actionBar = null;
+        }
+        parentLayout = null;
     }
 
     protected void setParentLayout(ActionBarLayout layout) {
@@ -63,7 +97,9 @@ public class BaseFragment {
                         FileLog.e("tmessages", e);
                     }
                 }
-                fragmentView = null;
+                if (parentLayout != null && parentLayout.getContext() != fragmentView.getContext()) {
+                    fragmentView = null;
+                }
             }
             if (actionBar != null) {
                 ViewGroup parent = (ViewGroup) actionBar.getParent();
@@ -74,14 +110,22 @@ public class BaseFragment {
                         FileLog.e("tmessages", e);
                     }
                 }
+                if (parentLayout != null && parentLayout.getContext() != actionBar.getContext()) {
+                    actionBar = null;
+                }
             }
-            if (parentLayout != null) {
-                actionBar = new ActionBar(parentLayout.getContext());
+            if (parentLayout != null && actionBar == null) {
+                actionBar = createActionBar(parentLayout.getContext());
                 actionBar.parentFragment = this;
-                actionBar.setBackgroundColor(0xff54759e);
-                actionBar.setItemsBackground(R.drawable.bar_selector);
             }
         }
+    }
+
+    protected ActionBar createActionBar(Context context) {
+        ActionBar actionBar = new ActionBar(context);
+        actionBar.setBackgroundColor(Theme.ACTION_BAR_COLOR);
+        actionBar.setItemsBackgroundColor(Theme.ACTION_BAR_SELECTOR_COLOR);
+        return actionBar;
     }
 
     public void finishFragment() {
@@ -107,11 +151,15 @@ public class BaseFragment {
     }
 
     public void onFragmentDestroy() {
-        ConnectionsManager.getInstance().cancelRpcsForClassGuid(classGuid);
+        ConnectionsManager.getInstance().cancelRequestsForGuid(classGuid);
         isFinished = true;
         if (actionBar != null) {
             actionBar.setEnabled(false);
         }
+    }
+
+    public boolean needDelayOpenAnimation() {
+        return false;
     }
 
     public void onResume() {
@@ -123,7 +171,7 @@ public class BaseFragment {
             actionBar.onPause();
         }
         try {
-            if (visibleDialog != null && visibleDialog.isShowing()) {
+            if (visibleDialog != null && visibleDialog.isShowing() && dismissDialogOnPause(visibleDialog)) {
                 visibleDialog.dismiss();
                 visibleDialog = null;
             }
@@ -141,6 +189,10 @@ public class BaseFragment {
     }
 
     public void onActivityResultFragment(int requestCode, int resultCode, Intent data) {
+
+    }
+
+    public void onRequestPermissionsResultFragment(int requestCode, String[] permissions, int[] grantResults) {
 
     }
 
@@ -177,6 +229,10 @@ public class BaseFragment {
         }
     }
 
+    public boolean dismissDialogOnPause(Dialog dialog) {
+        return true;
+    }
+
     public void onBeginSlide() {
         try {
             if (visibleDialog != null && visibleDialog.isShowing()) {
@@ -191,20 +247,32 @@ public class BaseFragment {
         }
     }
 
-    public void onOpenAnimationEnd() {
+    protected void onTransitionAnimationStart(boolean isOpen, boolean backward) {
 
+    }
+
+    protected void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
+
+    }
+
+    protected void onBecomeFullyVisible() {
+
+    }
+
+    protected AnimatorSet onCustomTransitionAnimation(boolean isOpen, final Runnable callback) {
+        return null;
     }
 
     public void onLowMemory() {
 
     }
 
-    public boolean needAddActionBar() {
-        return true;
+    public Dialog showDialog(Dialog dialog) {
+        return showDialog(dialog, false);
     }
 
-    public AlertDialog showAlertDialog(AlertDialog.Builder builder) {
-        if (parentLayout == null || parentLayout.checkTransitionAnimation() || parentLayout.animationInProgress || parentLayout.startedTracking) {
+    public Dialog showDialog(Dialog dialog, boolean allowInTransition) {
+        if (dialog == null || parentLayout == null || parentLayout.animationInProgress || parentLayout.startedTracking || !allowInTransition && parentLayout.checkTransitionAnimation()) {
             return null;
         }
         try {
@@ -216,15 +284,16 @@ public class BaseFragment {
             FileLog.e("tmessages", e);
         }
         try {
-            visibleDialog = builder.show();
+            visibleDialog = dialog;
             visibleDialog.setCanceledOnTouchOutside(true);
             visibleDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
                 @Override
                 public void onDismiss(DialogInterface dialog) {
+                    onDialogDismiss(visibleDialog);
                     visibleDialog = null;
-                    onDialogDismiss();
                 }
             });
+            visibleDialog.show();
             return visibleDialog;
         } catch (Exception e) {
             FileLog.e("tmessages", e);
@@ -232,7 +301,15 @@ public class BaseFragment {
         return null;
     }
 
-    protected void onDialogDismiss() {
+    protected void onDialogDismiss(Dialog dialog) {
 
+    }
+
+    public Dialog getVisibleDialog() {
+        return visibleDialog;
+    }
+
+    public void setVisibleDialog(Dialog dialog) {
+        visibleDialog = dialog;
     }
 }

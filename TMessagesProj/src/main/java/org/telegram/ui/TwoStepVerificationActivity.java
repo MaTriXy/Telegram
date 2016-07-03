@@ -1,14 +1,15 @@
 /*
- * This is the source code of Telegram for Android v. 2.x
+ * This is the source code of Telegram for Android v. 3.x.x
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2015.
+ * Copyright Nikolai Kudashov, 2013-2016.
  */
 
 package org.telegram.ui;
 
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -18,16 +19,13 @@ import android.text.InputType;
 import android.text.method.PasswordTransformationMethod;
 import android.util.TypedValue;
 import android.view.ActionMode;
-import android.view.ContextMenu;
 import android.view.Gravity;
 import android.view.KeyEvent;
-import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.AdapterView;
 import android.widget.EditText;
@@ -39,15 +37,15 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.telegram.android.AndroidUtilities;
-import org.telegram.android.LocaleController;
-import org.telegram.android.NotificationCenter;
-import org.telegram.messenger.ConnectionsManager;
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.R;
-import org.telegram.messenger.RPCRequest;
-import org.telegram.messenger.TLObject;
-import org.telegram.messenger.TLRPC;
+import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.RequestDelegate;
+import org.telegram.tgnet.TLObject;
+import org.telegram.tgnet.TLRPC;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
@@ -56,6 +54,7 @@ import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.Adapters.BaseFragmentAdapter;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.LayoutHelper;
 
 public class TwoStepVerificationActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
 
@@ -136,13 +135,11 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
             }
             progressDialog = null;
         }
-        if (!AndroidUtilities.isTablet() && getParentActivity() != null) {
-            getParentActivity().getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
-        }
+        AndroidUtilities.removeAdjustResize(getParentActivity(), classGuid);
     }
 
     @Override
-    public View createView(Context context, LayoutInflater inflater) {
+    public View createView(Context context) {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(false);
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
@@ -167,8 +164,8 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
         scrollView.setFillViewport(true);
         frameLayout.addView(scrollView);
         FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) scrollView.getLayoutParams();
-        layoutParams.width = FrameLayout.LayoutParams.MATCH_PARENT;
-        layoutParams.height = FrameLayout.LayoutParams.MATCH_PARENT;
+        layoutParams.width = LayoutHelper.MATCH_PARENT;
+        layoutParams.height = LayoutHelper.MATCH_PARENT;
         scrollView.setLayoutParams(layoutParams);
 
         LinearLayout linearLayout = new LinearLayout(context);
@@ -185,8 +182,8 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
         titleTextView.setGravity(Gravity.CENTER_HORIZONTAL);
         linearLayout.addView(titleTextView);
         LinearLayout.LayoutParams layoutParams3 = (LinearLayout.LayoutParams) titleTextView.getLayoutParams();
-        layoutParams3.width = FrameLayout.LayoutParams.WRAP_CONTENT;
-        layoutParams3.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+        layoutParams3.width = LayoutHelper.WRAP_CONTENT;
+        layoutParams3.height = LayoutHelper.WRAP_CONTENT;
         layoutParams3.gravity = Gravity.CENTER_HORIZONTAL;
         layoutParams3.topMargin = AndroidUtilities.dp(38);
         titleTextView.setLayoutParams(layoutParams3);
@@ -209,7 +206,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
         layoutParams3.leftMargin = AndroidUtilities.dp(40);
         layoutParams3.rightMargin = AndroidUtilities.dp(40);
         layoutParams3.gravity = Gravity.TOP | Gravity.LEFT;
-        layoutParams3.width = LinearLayout.LayoutParams.MATCH_PARENT;
+        layoutParams3.width = LayoutHelper.MATCH_PARENT;
         passwordEditText.setLayoutParams(layoutParams3);
         passwordEditText.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
@@ -221,30 +218,22 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                 return false;
             }
         });
-        if (android.os.Build.VERSION.SDK_INT < 11) {
-            passwordEditText.setOnCreateContextMenuListener(new View.OnCreateContextMenuListener() {
-                public void onCreateContextMenu(ContextMenu menu, View v, ContextMenu.ContextMenuInfo menuInfo) {
-                    menu.clear();
-                }
-            });
-        } else {
-            passwordEditText.setCustomSelectionActionModeCallback(new ActionMode.Callback() {
-                public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
-                    return false;
-                }
+        passwordEditText.setCustomSelectionActionModeCallback(new ActionMode.Callback() {
+            public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
+                return false;
+            }
 
-                public void onDestroyActionMode(ActionMode mode) {
-                }
+            public void onDestroyActionMode(ActionMode mode) {
+            }
 
-                public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-                    return false;
-                }
+            public boolean onCreateActionMode(ActionMode mode, Menu menu) {
+                return false;
+            }
 
-                public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
-                    return false;
-                }
-            });
-        }
+            public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
+                return false;
+            }
+        });
 
         bottomTextView = new TextView(context);
         bottomTextView.setTextColor(0xff757575);
@@ -253,8 +242,8 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
         bottomTextView.setText(LocaleController.getString("YourEmailInfo", R.string.YourEmailInfo));
         linearLayout.addView(bottomTextView);
         layoutParams3 = (LinearLayout.LayoutParams) bottomTextView.getLayoutParams();
-        layoutParams3.width = FrameLayout.LayoutParams.WRAP_CONTENT;
-        layoutParams3.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+        layoutParams3.width = LayoutHelper.WRAP_CONTENT;
+        layoutParams3.height = LayoutHelper.WRAP_CONTENT;
         layoutParams3.gravity = (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.TOP;
         layoutParams3.topMargin = AndroidUtilities.dp(30);
         layoutParams3.leftMargin = AndroidUtilities.dp(40);
@@ -265,8 +254,8 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
         linearLayout2.setGravity(Gravity.BOTTOM | Gravity.CENTER_VERTICAL);
         linearLayout.addView(linearLayout2);
         layoutParams3 = (LinearLayout.LayoutParams) linearLayout2.getLayoutParams();
-        layoutParams3.width = LinearLayout.LayoutParams.MATCH_PARENT;
-        layoutParams3.height = LinearLayout.LayoutParams.MATCH_PARENT;
+        layoutParams3.width = LayoutHelper.MATCH_PARENT;
+        layoutParams3.height = LayoutHelper.MATCH_PARENT;
         linearLayout2.setLayoutParams(layoutParams3);
 
         bottomButton = new TextView(context);
@@ -277,8 +266,8 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
         bottomButton.setPadding(0, AndroidUtilities.dp(10), 0, 0);
         linearLayout2.addView(bottomButton);
         layoutParams3 = (LinearLayout.LayoutParams) bottomButton.getLayoutParams();
-        layoutParams3.width = FrameLayout.LayoutParams.WRAP_CONTENT;
-        layoutParams3.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+        layoutParams3.width = LayoutHelper.WRAP_CONTENT;
+        layoutParams3.height = LayoutHelper.WRAP_CONTENT;
         layoutParams3.gravity = (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.BOTTOM;
         layoutParams3.bottomMargin = AndroidUtilities.dp(14);
         layoutParams3.leftMargin = AndroidUtilities.dp(40);
@@ -291,7 +280,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                     if (currentPassword.has_recovery) {
                         needShowProgress();
                         TLRPC.TL_auth_requestPasswordRecovery req = new TLRPC.TL_auth_requestPasswordRecovery();
-                        ConnectionsManager.getInstance().performRpc(req, new RPCRequest.RPCRequestDelegate() {
+                        ConnectionsManager.getInstance().sendRequest(req, new RequestDelegate() {
                             @Override
                             public void run(final TLObject response, final TLRPC.TL_error error) {
                                 AndroidUtilities.runOnUIThread(new Runnable() {
@@ -313,7 +302,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                                                     presentFragment(fragment);
                                                 }
                                             });
-                                            AlertDialog dialog = showAlertDialog(builder);
+                                            Dialog dialog = showDialog(builder.create());
                                             if (dialog != null) {
                                                 dialog.setCanceledOnTouchOutside(false);
                                                 dialog.setCancelable(false);
@@ -335,7 +324,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                                     }
                                 });
                             }
-                        }, true, RPCRequest.RPCRequestClassGeneric | RPCRequest.RPCRequestClassFailOnServerErrors | RPCRequest.RPCRequestClassWithoutLogin);
+                        }, ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin);
                     } else {
                         showAlertWithText(LocaleController.getString("RestorePasswordNoEmailTitle", R.string.RestorePasswordNoEmailTitle), LocaleController.getString("RestorePasswordNoEmailText", R.string.RestorePasswordNoEmailText));
                     }
@@ -354,7 +343,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                             }
                         });
                         builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
-                        showAlertDialog(builder);
+                        showDialog(builder.create());
                     }
                 }
             }
@@ -364,8 +353,8 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
             progressView = new FrameLayout(context);
             frameLayout.addView(progressView);
             layoutParams = (FrameLayout.LayoutParams) progressView.getLayoutParams();
-            layoutParams.width = FrameLayout.LayoutParams.MATCH_PARENT;
-            layoutParams.height = FrameLayout.LayoutParams.MATCH_PARENT;
+            layoutParams.width = LayoutHelper.MATCH_PARENT;
+            layoutParams.height = LayoutHelper.MATCH_PARENT;
             progressView.setLayoutParams(layoutParams);
             progressView.setOnTouchListener(new View.OnTouchListener() {
                 @Override
@@ -377,8 +366,8 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
             ProgressBar progressBar = new ProgressBar(context);
             progressView.addView(progressBar);
             layoutParams = (FrameLayout.LayoutParams) progressView.getLayoutParams();
-            layoutParams.width = FrameLayout.LayoutParams.WRAP_CONTENT;
-            layoutParams.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+            layoutParams.width = LayoutHelper.WRAP_CONTENT;
+            layoutParams.height = LayoutHelper.WRAP_CONTENT;
             layoutParams.gravity = Gravity.CENTER;
             progressView.setLayoutParams(layoutParams);
 
@@ -390,8 +379,8 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
             listView.setDrawSelectorOnTop(true);
             frameLayout.addView(listView);
             layoutParams = (FrameLayout.LayoutParams) listView.getLayoutParams();
-            layoutParams.width = FrameLayout.LayoutParams.MATCH_PARENT;
-            layoutParams.height = FrameLayout.LayoutParams.MATCH_PARENT;
+            layoutParams.width = LayoutHelper.MATCH_PARENT;
+            layoutParams.height = LayoutHelper.MATCH_PARENT;
             layoutParams.gravity = Gravity.TOP;
             listView.setLayoutParams(layoutParams);
             listView.setAdapter(listAdapter = new ListAdapter(context));
@@ -421,7 +410,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                             }
                         });
                         builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
-                        showAlertDialog(builder);
+                        showDialog(builder.create());
                     }
                 }
             });
@@ -440,7 +429,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
     @Override
     public void didReceivedNotification(int id, Object... args) {
         if (id == NotificationCenter.didSetTwoStepPassword) {
-            if (args != null && args.length > 0) {
+            if (args != null && args.length > 0 && args[0] != null) {
                 currentPasswordHash = (byte[]) args[0];
             }
             loadPasswordInfo(false);
@@ -462,15 +451,12 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                 }
             }, 200);
         }
-        if (!AndroidUtilities.isTablet()) {
-            getParentActivity().getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-        }
+        AndroidUtilities.requestAdjustResize(getParentActivity(), classGuid);
     }
 
     @Override
-    public void onOpenAnimationEnd() {
-        super.onOpenAnimationEnd();
-        if (type == 1) {
+    public void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
+        if (isOpen && type == 1) {
             AndroidUtilities.showKeyboard(passwordEditText);
         }
     }
@@ -480,7 +466,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
             loading = true;
         }
         TLRPC.TL_account_getPassword req = new TLRPC.TL_account_getPassword();
-        ConnectionsManager.getInstance().performRpc(req, new RPCRequest.RPCRequestDelegate() {
+        ConnectionsManager.getInstance().sendRequest(req, new RequestDelegate() {
             @Override
             public void run(final TLObject response, final TLRPC.TL_error error) {
                 AndroidUtilities.runOnUIThread(new Runnable() {
@@ -489,7 +475,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                         loading = false;
                         if (error == null) {
                             if (!silent) {
-                                passwordEntered = currentPassword != null || currentPassword == null && response instanceof TLRPC.TL_account_noPassword;
+                                passwordEntered = currentPassword != null || response instanceof TLRPC.TL_account_noPassword;
                             }
                             currentPassword = (TLRPC.account_Password) response;
                             waitingForEmail = currentPassword.email_unconfirmed_pattern.length() > 0;
@@ -515,7 +501,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                     }
                 });
             }
-        }, true, RPCRequest.RPCRequestClassGeneric | RPCRequest.RPCRequestClassFailOnServerErrors | RPCRequest.RPCRequestClassWithoutLogin);
+        }, ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin);
     }
 
     private void setPasswordSetState(int state) {
@@ -685,8 +671,8 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
         if (text == null || text.length() < 3) {
             return false;
         }
-        int dot = text.lastIndexOf(".");
-        int dog = text.lastIndexOf("@");
+        int dot = text.lastIndexOf('.');
+        int dog = text.lastIndexOf('@');
         return !(dot < 0 || dog < 0 || dot < dog);
     }
 
@@ -695,7 +681,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
         builder.setPositiveButton(LocaleController.getString("OK", R.string.OK), null);
         builder.setTitle(title);
         builder.setMessage(text);
-        showAlertDialog(builder);
+        showDialog(builder.create());
     }
 
     private void setNewPassword(final boolean clear) {
@@ -706,6 +692,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
             if (waitingForEmail && currentPassword instanceof TLRPC.TL_account_noPassword) {
                 req.new_settings.flags = 2;
                 req.new_settings.email = "";
+                req.current_password_hash = new byte[0];
             } else {
                 req.new_settings.flags = 3;
                 req.new_settings.hint = "";
@@ -738,7 +725,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
             }
         }
         needShowProgress();
-        ConnectionsManager.getInstance().performRpc(req, new RPCRequest.RPCRequestDelegate() {
+        ConnectionsManager.getInstance().sendRequest(req, new RequestDelegate() {
             @Override
             public void run(final TLObject response, final TLRPC.TL_error error) {
                 AndroidUtilities.runOnUIThread(new Runnable() {
@@ -765,13 +752,13 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                                 });
                                 builder.setMessage(LocaleController.getString("YourPasswordSuccessText", R.string.YourPasswordSuccessText));
                                 builder.setTitle(LocaleController.getString("YourPasswordSuccess", R.string.YourPasswordSuccess));
-                                AlertDialog dialog = showAlertDialog(builder);
+                                Dialog dialog = showDialog(builder.create());
                                 if (dialog != null) {
                                     dialog.setCanceledOnTouchOutside(false);
                                     dialog.setCancelable(false);
                                 }
                             }
-                        } else {
+                        } else if (error != null) {
                             if (error.text.equals("EMAIL_UNCONFIRMED")) {
                                 AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
                                 builder.setPositiveButton(LocaleController.getString("OK", R.string.OK), new DialogInterface.OnClickListener() {
@@ -783,7 +770,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                                 });
                                 builder.setMessage(LocaleController.getString("YourEmailAlmostThereText", R.string.YourEmailAlmostThereText));
                                 builder.setTitle(LocaleController.getString("YourEmailAlmostThere", R.string.YourEmailAlmostThere));
-                                AlertDialog dialog = showAlertDialog(builder);
+                                Dialog dialog = showDialog(builder.create());
                                 if (dialog != null) {
                                     dialog.setCanceledOnTouchOutside(false);
                                     dialog.setCancelable(false);
@@ -808,7 +795,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                     }
                 });
             }
-        }, true, RPCRequest.RPCRequestClassGeneric | RPCRequest.RPCRequestClassFailOnServerErrors | RPCRequest.RPCRequestClassWithoutLogin);
+        }, ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin);
     }
 
     private void processDone() {
@@ -834,7 +821,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
 
                 final TLRPC.TL_account_getPasswordSettings req = new TLRPC.TL_account_getPasswordSettings();
                 req.current_password_hash = Utilities.computeSHA256(hash, 0, hash.length);
-                ConnectionsManager.getInstance().performRpc(req, new RPCRequest.RPCRequestDelegate() {
+                ConnectionsManager.getInstance().sendRequest(req, new RequestDelegate() {
                     @Override
                     public void run(final TLObject response, final TLRPC.TL_error error) {
                         AndroidUtilities.runOnUIThread(new Runnable() {
@@ -865,7 +852,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                             }
                         });
                     }
-                }, true, RPCRequest.RPCRequestClassGeneric | RPCRequest.RPCRequestClassFailOnServerErrors | RPCRequest.RPCRequestClassWithoutLogin);
+                }, ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin);
             }
         } else if (type == 1) {
             if (passwordSetState == 0) {
@@ -919,7 +906,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                 }
                 TLRPC.TL_auth_recoverPassword req = new TLRPC.TL_auth_recoverPassword();
                 req.code = code;
-                ConnectionsManager.getInstance().performRpc(req, new RPCRequest.RPCRequestDelegate() {
+                ConnectionsManager.getInstance().sendRequest(req, new RequestDelegate() {
                     @Override
                     public void run(TLObject response, final TLRPC.TL_error error) {
                         AndroidUtilities.runOnUIThread(new Runnable() {
@@ -936,7 +923,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                                     });
                                     builder.setMessage(LocaleController.getString("PasswordReset", R.string.PasswordReset));
                                     builder.setTitle(LocaleController.getString("AppName", R.string.AppName));
-                                    AlertDialog dialog = showAlertDialog(builder);
+                                    Dialog dialog = showDialog(builder.create());
                                     if (dialog != null) {
                                         dialog.setCanceledOnTouchOutside(false);
                                         dialog.setCancelable(false);
@@ -960,7 +947,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
                             }
                         });
                     }
-                }, true, RPCRequest.RPCRequestClassGeneric | RPCRequest.RPCRequestClassFailOnServerErrors | RPCRequest.RPCRequestClassWithoutLogin);
+                }, ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin);
             }
         }
     }
@@ -976,7 +963,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
         if (clear) {
             passwordEditText.setText("");
         }
-        AndroidUtilities.shakeTextView(titleTextView, 2, 0);
+        AndroidUtilities.shakeView(titleTextView, 2, 0);
     }
 
     private class ListAdapter extends BaseFragmentAdapter {
@@ -993,7 +980,7 @@ public class TwoStepVerificationActivity extends BaseFragment implements Notific
 
         @Override
         public boolean isEnabled(int i) {
-            return i != setPasswordDetailRow && i != shadowRow && i != passwordSetupDetailRow && i != passwordEmailVerifyDetailRow;
+            return i != setPasswordDetailRow && i != shadowRow && i != passwordSetupDetailRow && i != passwordEmailVerifyDetailRow && i != passwordEnabledDetailRow;
         }
 
         @Override

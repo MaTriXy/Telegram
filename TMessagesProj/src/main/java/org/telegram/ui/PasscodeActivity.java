@@ -1,9 +1,9 @@
 /*
- * This is the source code of Telegram for Android v. 2.x
+ * This is the source code of Telegram for Android v. 3.x.x
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2015.
+ * Copyright Nikolai Kudashov, 2013-2016.
  */
 
 package org.telegram.ui;
@@ -15,6 +15,7 @@ import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Vibrator;
+import android.support.v4.hardware.fingerprint.FingerprintManagerCompat;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -24,10 +25,8 @@ import android.text.method.DigitsKeyListener;
 import android.text.method.PasswordTransformationMethod;
 import android.util.TypedValue;
 import android.view.ActionMode;
-import android.view.ContextMenu;
 import android.view.Gravity;
 import android.view.KeyEvent;
-import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -37,14 +36,13 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.AdapterView;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.telegram.android.AndroidUtilities;
-import org.telegram.android.LocaleController;
-import org.telegram.android.NotificationCenter;
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.R;
@@ -58,6 +56,7 @@ import org.telegram.ui.Adapters.BaseFragmentAdapter;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.NumberPicker;
 
 public class PasscodeActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
@@ -71,11 +70,13 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
 
     private int type;
     private int currentPasswordType = 0;
+    private int passcodeSetStep = 0;
     private String firstPassword;
 
     private int passcodeRow;
     private int changePasscodeRow;
     private int passcodeDetailRow;
+    private int fingerprintRow;
     private int autoLockRow;
     private int autoLockDetailRow;
     private int rowCount;
@@ -108,7 +109,7 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
     }
 
     @Override
-    public View createView(Context context, LayoutInflater inflater) {
+    public View createView(Context context) {
         if (type != 3) {
             actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         }
@@ -119,9 +120,9 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                 if (id == -1) {
                     finishFragment();
                 } else if (id == done_button) {
-                    if (passwordEditText.getImeOptions() == EditorInfo.IME_ACTION_NEXT) {
+                    if (passcodeSetStep == 0) {
                         processNext();
-                    } else if (passwordEditText.getImeOptions() == EditorInfo.IME_ACTION_DONE) {
+                    } else if (passcodeSetStep == 1) {
                         processDone();
                     }
                 } else if (id == pin_item) {
@@ -156,8 +157,8 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
             titleTextView.setGravity(Gravity.CENTER_HORIZONTAL);
             frameLayout.addView(titleTextView);
             FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) titleTextView.getLayoutParams();
-            layoutParams.width = FrameLayout.LayoutParams.WRAP_CONTENT;
-            layoutParams.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+            layoutParams.width = LayoutHelper.WRAP_CONTENT;
+            layoutParams.height = LayoutHelper.WRAP_CONTENT;
             layoutParams.gravity = Gravity.CENTER_HORIZONTAL;
             layoutParams.topMargin = AndroidUtilities.dp(38);
             titleTextView.setLayoutParams(layoutParams);
@@ -170,8 +171,10 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
             passwordEditText.setGravity(Gravity.CENTER_HORIZONTAL);
             passwordEditText.setSingleLine(true);
             if (type == 1) {
+                passcodeSetStep = 0;
                 passwordEditText.setImeOptions(EditorInfo.IME_ACTION_NEXT);
             } else {
+                passcodeSetStep = 1;
                 passwordEditText.setImeOptions(EditorInfo.IME_ACTION_DONE);
             }
             passwordEditText.setTransformationMethod(PasswordTransformationMethod.getInstance());
@@ -184,15 +187,15 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
             layoutParams.leftMargin = AndroidUtilities.dp(40);
             layoutParams.gravity = Gravity.TOP | Gravity.LEFT;
             layoutParams.rightMargin = AndroidUtilities.dp(40);
-            layoutParams.width = LinearLayout.LayoutParams.MATCH_PARENT;
+            layoutParams.width = LayoutHelper.MATCH_PARENT;
             passwordEditText.setLayoutParams(layoutParams);
             passwordEditText.setOnEditorActionListener(new TextView.OnEditorActionListener() {
                 @Override
                 public boolean onEditorAction(TextView textView, int i, KeyEvent keyEvent) {
-                    if (i == EditorInfo.IME_ACTION_NEXT) {
+                    if (passcodeSetStep == 0) {
                         processNext();
                         return true;
-                    } else if (i == EditorInfo.IME_ACTION_DONE) {
+                    } else if (passcodeSetStep == 1) {
                         processDone();
                         return true;
                     }
@@ -216,49 +219,42 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                         if (type == 2 && UserConfig.passcodeType == 0) {
                             processDone();
                         } else if (type == 1 && currentPasswordType == 0) {
-                            if (passwordEditText.getImeOptions() == EditorInfo.IME_ACTION_NEXT) {
+                            if (passcodeSetStep == 0) {
                                 processNext();
-                            } else if (passwordEditText.getImeOptions() == EditorInfo.IME_ACTION_DONE) {
+                            } else if (passcodeSetStep == 1) {
                                 processDone();
                             }
                         }
                     }
                 }
             });
-            if (android.os.Build.VERSION.SDK_INT < 11) {
-                passwordEditText.setOnCreateContextMenuListener(new View.OnCreateContextMenuListener() {
-                    public void onCreateContextMenu(ContextMenu menu, View v, ContextMenu.ContextMenuInfo menuInfo) {
-                        menu.clear();
-                    }
-                });
-            } else {
-                passwordEditText.setCustomSelectionActionModeCallback(new ActionMode.Callback() {
-                    public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
-                        return false;
-                    }
 
-                    public void onDestroyActionMode(ActionMode mode) {
-                    }
+            passwordEditText.setCustomSelectionActionModeCallback(new ActionMode.Callback() {
+                public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
+                    return false;
+                }
 
-                    public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-                        return false;
-                    }
+                public void onDestroyActionMode(ActionMode mode) {
+                }
 
-                    public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
-                        return false;
-                    }
-                });
-            }
+                public boolean onCreateActionMode(ActionMode mode, Menu menu) {
+                    return false;
+                }
+
+                public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
+                    return false;
+                }
+            });
 
             if (type == 1) {
-                dropDownContainer = new ActionBarMenuItem(context, menu, R.drawable.bar_selector);
+                dropDownContainer = new ActionBarMenuItem(context, menu, 0);
                 dropDownContainer.setSubMenuOpenSide(1);
                 dropDownContainer.addSubItem(pin_item, LocaleController.getString("PasscodePIN", R.string.PasscodePIN), 0);
                 dropDownContainer.addSubItem(password_item, LocaleController.getString("PasscodePassword", R.string.PasscodePassword), 0);
                 actionBar.addView(dropDownContainer);
                 layoutParams = (FrameLayout.LayoutParams) dropDownContainer.getLayoutParams();
-                layoutParams.height = FrameLayout.LayoutParams.MATCH_PARENT;
-                layoutParams.width = FrameLayout.LayoutParams.WRAP_CONTENT;
+                layoutParams.height = LayoutHelper.MATCH_PARENT;
+                layoutParams.width = LayoutHelper.WRAP_CONTENT;
                 layoutParams.rightMargin = AndroidUtilities.dp(40);
                 layoutParams.leftMargin = AndroidUtilities.isTablet() ? AndroidUtilities.dp(64) : AndroidUtilities.dp(56);
                 layoutParams.gravity = Gravity.TOP | Gravity.LEFT;
@@ -283,8 +279,8 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                 dropDown.setPadding(0, 0, AndroidUtilities.dp(10), 0);
                 dropDownContainer.addView(dropDown);
                 layoutParams = (FrameLayout.LayoutParams) dropDown.getLayoutParams();
-                layoutParams.width = FrameLayout.LayoutParams.WRAP_CONTENT;
-                layoutParams.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+                layoutParams.width = LayoutHelper.WRAP_CONTENT;
+                layoutParams.height = LayoutHelper.WRAP_CONTENT;
                 layoutParams.leftMargin = AndroidUtilities.dp(16);
                 layoutParams.gravity = Gravity.CENTER_VERTICAL;
                 layoutParams.bottomMargin = AndroidUtilities.dp(1);
@@ -304,8 +300,8 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
             listView.setDrawSelectorOnTop(true);
             frameLayout.addView(listView);
             FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) listView.getLayoutParams();
-            layoutParams.width = FrameLayout.LayoutParams.MATCH_PARENT;
-            layoutParams.height = FrameLayout.LayoutParams.MATCH_PARENT;
+            layoutParams.width = LayoutHelper.MATCH_PARENT;
+            layoutParams.height = LayoutHelper.MATCH_PARENT;
             layoutParams.gravity = Gravity.TOP;
             listView.setLayoutParams(layoutParams);
             listView.setAdapter(listAdapter = new ListAdapter(context));
@@ -358,7 +354,7 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                             @Override
                             public String format(int value) {
                                 if (value == 0) {
-                                    return LocaleController.getString("Disabled", R.string.Disabled);
+                                    return LocaleController.getString("AutoLockDisabled", R.string.AutoLockDisabled);
                                 } else if (value == 1) {
                                     return LocaleController.formatString("AutoLockInTime", R.string.AutoLockInTime, LocaleController.formatPluralString("Minutes", 1));
                                 } else if (value == 2) {
@@ -391,7 +387,11 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                                 UserConfig.saveConfig(false);
                             }
                         });
-                        showAlertDialog(builder);
+                        showDialog(builder.create());
+                    } else if (i == fingerprintRow) {
+                        UserConfig.useFingerprint = !UserConfig.useFingerprint;
+                        UserConfig.saveConfig(false);
+                        ((TextCheckCell) view).setChecked(UserConfig.useFingerprint);
                     }
                 }
             });
@@ -438,9 +438,20 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
         changePasscodeRow = rowCount++;
         passcodeDetailRow = rowCount++;
         if (UserConfig.passcodeHash.length() > 0) {
+            try {
+                if (Build.VERSION.SDK_INT >= 23) {
+                    FingerprintManagerCompat fingerprintManager = FingerprintManagerCompat.from(ApplicationLoader.applicationContext);
+                    if (fingerprintManager.isHardwareDetected()) {
+                        fingerprintRow = rowCount++;
+                    }
+                }
+            } catch (Throwable e) {
+                FileLog.e("tmessages", e);
+            }
             autoLockRow = rowCount++;
             autoLockDetailRow = rowCount++;
         } else {
+            fingerprintRow = -1;
             autoLockRow = -1;
             autoLockDetailRow = -1;
         }
@@ -456,16 +467,15 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                 public boolean onPreDraw() {
                     listView.getViewTreeObserver().removeOnPreDrawListener(this);
                     fixLayoutInternal();
-                    return false;
+                    return true;
                 }
             });
         }
     }
 
     @Override
-    public void onOpenAnimationEnd() {
-        super.onOpenAnimationEnd();
-        if (type != 0) {
+    public void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
+        if (isOpen && type != 0) {
             AndroidUtilities.showKeyboard(passwordEditText);
         }
     }
@@ -506,7 +516,7 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
         titleTextView.setText(LocaleController.getString("ReEnterYourPasscode", R.string.ReEnterYourPasscode));
         firstPassword = passwordEditText.getText().toString();
         passwordEditText.setText("");
-        passwordEditText.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        passcodeSetStep = 1;
     }
 
     private void processDone() {
@@ -521,20 +531,32 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
                 } catch (Exception e) {
                     FileLog.e("tmessages", e);
                 }
-                AndroidUtilities.shakeTextView(titleTextView, 2, 0);
+                AndroidUtilities.shakeView(titleTextView, 2, 0);
                 passwordEditText.setText("");
                 return;
             }
-            UserConfig.passcodeHash = Utilities.MD5(firstPassword);
+
+            try {
+                UserConfig.passcodeSalt = new byte[16];
+                Utilities.random.nextBytes(UserConfig.passcodeSalt);
+                byte[] passcodeBytes = firstPassword.getBytes("UTF-8");
+                byte[] bytes = new byte[32 + passcodeBytes.length];
+                System.arraycopy(UserConfig.passcodeSalt, 0, bytes, 0, 16);
+                System.arraycopy(passcodeBytes, 0, bytes, 16, passcodeBytes.length);
+                System.arraycopy(UserConfig.passcodeSalt, 0, bytes, passcodeBytes.length + 16, 16);
+                UserConfig.passcodeHash = Utilities.bytesToHex(Utilities.computeSHA256(bytes, 0, bytes.length));
+            } catch (Exception e) {
+                FileLog.e("tmessages", e);
+            }
+
             UserConfig.passcodeType = currentPasswordType;
             UserConfig.saveConfig(false);
-            //TODO show alert
             finishFragment();
             NotificationCenter.getInstance().postNotificationName(NotificationCenter.didSetPasscode);
             passwordEditText.clearFocus();
             AndroidUtilities.hideKeyboard(passwordEditText);
         } else if (type == 2) {
-            if (!Utilities.MD5(passwordEditText.getText().toString()).equals(UserConfig.passcodeHash)) {
+            if (!UserConfig.checkPasscode(passwordEditText.getText().toString())) {
                 passwordEditText.setText("");
                 onPasscodeError();
                 return;
@@ -553,7 +575,7 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
         if (v != null) {
             v.vibrate(200);
         }
-        AndroidUtilities.shakeTextView(titleTextView, 2, 0);
+        AndroidUtilities.shakeView(titleTextView, 2, 0);
     }
 
     private void fixLayoutInternal() {
@@ -585,7 +607,7 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
 
         @Override
         public boolean isEnabled(int i) {
-            return i == passcodeRow || i == autoLockRow || UserConfig.passcodeHash.length() != 0 && i == changePasscodeRow;
+            return i == passcodeRow || i == fingerprintRow || i == autoLockRow || UserConfig.passcodeHash.length() != 0 && i == changePasscodeRow;
         }
 
         @Override
@@ -620,6 +642,8 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
 
                 if (i == passcodeRow) {
                     textCell.setTextAndCheck(LocaleController.getString("Passcode", R.string.Passcode), UserConfig.passcodeHash.length() > 0, true);
+                } else if (i == fingerprintRow) {
+                    textCell.setTextAndCheck(LocaleController.getString("UnlockFingerprint", R.string.UnlockFingerprint), UserConfig.useFingerprint, true);
                 }
             } else if (viewType == 1) {
                 if (view == null) {
@@ -665,7 +689,7 @@ public class PasscodeActivity extends BaseFragment implements NotificationCenter
 
         @Override
         public int getItemViewType(int i) {
-            if (i == passcodeRow) {
+            if (i == passcodeRow || i == fingerprintRow) {
                 return 0;
             } else if (i == changePasscodeRow || i == autoLockRow) {
                 return 1;

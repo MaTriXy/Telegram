@@ -1,9 +1,9 @@
 /*
- * This is the source code of Telegram for Android v. 1.7.x.
+ * This is the source code of Telegram for Android v. 3.x.x.
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2014.
+ * Copyright Nikolai Kudashov, 2013-2016.
  */
 
 package org.telegram.ui.Components;
@@ -11,6 +11,7 @@ package org.telegram.ui.Components;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
@@ -18,27 +19,25 @@ import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
 
-import org.telegram.android.AndroidUtilities;
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.R;
-import org.telegram.messenger.TLRPC;
-import org.telegram.messenger.UserConfig;
+import org.telegram.tgnet.TLRPC;
 import org.telegram.messenger.ApplicationLoader;
-
-import java.util.Locale;
+import org.telegram.ui.ActionBar.Theme;
 
 public class AvatarDrawable extends Drawable {
 
     private static Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static TextPaint namePaint;
     private static TextPaint namePaintSmall;
-    private static int[] arrColors = {0xffe56555, 0xfff28c48, 0xffeec764, 0xff76c84d, 0xff5fbed5, 0xff549cdd, 0xff8e85ee, 0xfff2749a};
-    private static int[] arrColorsProfiles = {0xffd86f65, 0xfff69d61, 0xfffabb3c, 0xff67b35d, 0xff56a2bb, 0xff5c98cd, 0xff8c79d2, 0xfff37fa6};
-    private static int[] arrColorsProfilesBack = {0xffca6056, 0xfff18944, 0xff7d6ac4, 0xff56a14c, 0xff4492ac, 0xff4c84b6, 0xff7d6ac4, 0xff4c84b6};
-    private static int[] arrColorsProfilesText = {0xfff9cbc5, 0xfffdddc8, 0xffcdc4ed, 0xffc0edba, 0xffb8e2f0, 0xffb3d7f7, 0xffcdc4ed, 0xffb3d7f7};
+    private static int[] arrColors = {0xffe56555, 0xfff28c48, 0xff8e85ee, 0xff76c84d, 0xff5fbed5, 0xff549cdd, 0xff8e85ee, 0xfff2749a};
+    private static int[] arrColorsProfiles = {0xffd86f65, 0xfff69d61, 0xff8c79d2, 0xff67b35d, 0xff56a2bb, Theme.ACTION_BAR_MAIN_AVATAR_COLOR, 0xff8c79d2, 0xfff37fa6};
+    private static int[] arrColorsProfilesBack = {0xffca6056, 0xfff18944, 0xff7d6ac4, 0xff56a14c, 0xff4492ac, Theme.ACTION_BAR_PROFILE_COLOR, 0xff7d6ac4, 0xff4c84b6};
+    private static int[] arrColorsProfilesText = {0xfff9cbc5, 0xfffdddc8, 0xffcdc4ed, 0xffc0edba, 0xffb8e2f0, Theme.ACTION_BAR_PROFILE_SUBTITLE_COLOR, 0xffcdc4ed, 0xffb3d7f7};
     private static int[] arrColorsNames = {0xffca5650, 0xffd87b29, 0xff4e92cc, 0xff50b232, 0xff42b1a8, 0xff4e92cc, 0xff4e92cc, 0xff4e92cc};
-    private static int[] arrColorsButtons = {R.drawable.bar_selector_red, R.drawable.bar_selector_orange, R.drawable.bar_selector_violet,
-            R.drawable.bar_selector_green, R.drawable.bar_selector_cyan, R.drawable.bar_selector_blue, R.drawable.bar_selector_violet, R.drawable.bar_selector_blue};
+    private static int[] arrColorsButtons = {Theme.ACTION_BAR_RED_SELECTOR_COLOR, Theme.ACTION_BAR_ORANGE_SELECTOR_COLOR, Theme.ACTION_BAR_VIOLET_SELECTOR_COLOR,
+            Theme.ACTION_BAR_GREEN_SELECTOR_COLOR, Theme.ACTION_BAR_CYAN_SELECTOR_COLOR, Theme.ACTION_BAR_BLUE_SELECTOR_COLOR, Theme.ACTION_BAR_VIOLET_SELECTOR_COLOR, Theme.ACTION_BAR_BLUE_SELECTOR_COLOR};
 
     private static Drawable broadcastDrawable;
     private static Drawable photoDrawable;
@@ -52,6 +51,7 @@ public class AvatarDrawable extends Drawable {
     private boolean drawBrodcast;
     private boolean drawPhoto;
     private boolean smallStyle;
+    private StringBuilder stringBuilder = new StringBuilder(5);
 
     public AvatarDrawable() {
         super();
@@ -93,6 +93,10 @@ public class AvatarDrawable extends Drawable {
         }
     }
 
+    public void setProfile(boolean value) {
+        isProfile = value;
+    }
+
     public void setSmallStyle(boolean value) {
         smallStyle = value;
     }
@@ -101,7 +105,7 @@ public class AvatarDrawable extends Drawable {
         if (id >= 0 && id < 8) {
             return id;
         }
-        try {
+        /*try {
             String str;
             if (id >= 0) {
                 str = String.format(Locale.US, "%d%d", id, UserConfig.getClientUserId());
@@ -120,8 +124,8 @@ public class AvatarDrawable extends Drawable {
             return Math.abs(b) % arrColors.length;
         } catch (Exception e) {
             FileLog.e("tmessages", e);
-        }
-        return id % arrColors.length;
+        }*/
+        return Math.abs(id % arrColors.length);
     }
 
     public static int getColorForId(int id) {
@@ -178,9 +182,9 @@ public class AvatarDrawable extends Drawable {
             lastName = null;
         }
 
-        String text = "";
+        stringBuilder.setLength(0);
         if (firstName != null && firstName.length() > 0) {
-            text += firstName.substring(0, 1);
+            stringBuilder.append(firstName.substring(0, 1));
         }
         if (lastName != null && lastName.length() > 0) {
             String lastch = null;
@@ -191,27 +195,25 @@ public class AvatarDrawable extends Drawable {
                 lastch = lastName.substring(a, a + 1);
             }
             if (Build.VERSION.SDK_INT >= 16) {
-                text += "\u200C" + lastch;
-            } else {
-                text += lastch;
+                stringBuilder.append("\u200C");
             }
+            stringBuilder.append(lastch);
         } else if (firstName != null && firstName.length() > 0) {
             for (int a = firstName.length() - 1; a >= 0; a--) {
                 if (firstName.charAt(a) == ' ') {
                     if (a != firstName.length() - 1 && firstName.charAt(a + 1) != ' ') {
                         if (Build.VERSION.SDK_INT >= 16) {
-                            text += "\u200C" + firstName.substring(a + 1, a + 2);
-                        } else {
-                            text += firstName.substring(a + 1, a + 2);
+                            stringBuilder.append("\u200C");
                         }
+                        stringBuilder.append(firstName.substring(a + 1, a + 2));
                         break;
                     }
                 }
             }
         }
 
-        if (text.length() > 0) {
-            text = text.toUpperCase();
+        if (stringBuilder.length() > 0) {
+            String text = stringBuilder.toString().toUpperCase();
             try {
                 textLayout = new StaticLayout(text, (smallStyle ? namePaintSmall : namePaint), AndroidUtilities.dp(100), Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
                 if (textLayout.getLineCount() > 0) {
@@ -277,7 +279,7 @@ public class AvatarDrawable extends Drawable {
 
     @Override
     public int getOpacity() {
-        return 0;
+        return PixelFormat.TRANSPARENT;
     }
 
     @Override
