@@ -3,21 +3,29 @@
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2018.
  */
 
 package org.telegram.ui.Cells;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
+import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.view.View;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.animation.AccelerateInterpolator;
 import android.widget.FrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLoader;
+import org.telegram.messenger.ImageLocation;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -29,6 +37,7 @@ public class StickerCell extends FrameLayout {
     private boolean scaled;
     private float scale;
     private long time = 0;
+    private boolean clearsInputField;
     private static AccelerateInterpolator interpolator = new AccelerateInterpolator(0.5f);
 
     public StickerCell(Context context) {
@@ -37,6 +46,7 @@ public class StickerCell extends FrameLayout {
         imageView = new BackupImageView(context);
         imageView.setAspectFit(true);
         addView(imageView, LayoutHelper.createFrame(66, 66, Gravity.CENTER_HORIZONTAL, 0, 5, 0, 0));
+        setFocusable(true);
     }
 
     @Override
@@ -47,15 +57,24 @@ public class StickerCell extends FrameLayout {
     @Override
     public void setPressed(boolean pressed) {
         if (imageView.getImageReceiver().getPressed() != pressed) {
-            imageView.getImageReceiver().setPressed(pressed);
+            imageView.getImageReceiver().setPressed(pressed ? 1 : 0);
             imageView.invalidate();
         }
         super.setPressed(pressed);
     }
 
-    public void setSticker(TLRPC.Document document, int side) {
-        if (document != null && document.thumb != null) {
-            imageView.setImage(document.thumb.location, null, "webp", null);
+    public void setClearsInputField(boolean value) {
+        clearsInputField = value;
+    }
+
+    public boolean isClearsInputField() {
+        return clearsInputField;
+    }
+
+    public void setSticker(TLRPC.Document document, Object parentObject, int side) {
+        if (document != null) {
+            TLRPC.PhotoSize thumb = FileLoader.getClosestPhotoSizeWithSize(document.thumbs, 90);
+            imageView.setImage(ImageLocation.getForDocument(thumb, document), null, "webp", null, parentObject);
         }
         sticker = document;
         if (side == -1) {
@@ -71,8 +90,10 @@ public class StickerCell extends FrameLayout {
             setBackgroundResource(R.drawable.stickers_back_all);
             setPadding(AndroidUtilities.dp(3), 0, AndroidUtilities.dp(3), 0);
         }
-        if (getBackground() != null) {
-            getBackground().setAlpha(230);
+        Drawable background = getBackground();
+        if (background != null) {
+            background.setAlpha(230);
+            background.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chat_stickersHintPanel), PorterDuff.Mode.MULTIPLY));
         }
     }
 
@@ -114,5 +135,24 @@ public class StickerCell extends FrameLayout {
             invalidate();
         }
         return result;
+    }
+
+    @Override
+    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info){
+        super.onInitializeAccessibilityNodeInfo(info);
+        if (sticker == null)
+            return;
+        String emoji = null;
+        for (int a = 0; a < sticker.attributes.size(); a++) {
+            TLRPC.DocumentAttribute attribute = sticker.attributes.get(a);
+            if (attribute instanceof TLRPC.TL_documentAttributeSticker) {
+                emoji = attribute.alt != null && attribute.alt.length() > 0 ? attribute.alt : null;
+            }
+        }
+        if (emoji != null)
+            info.setText(emoji + " " + LocaleController.getString("AttachSticker", R.string.AttachSticker));
+        else
+            info.setText(LocaleController.getString("AttachSticker", R.string.AttachSticker));
+        info.setEnabled(true);
     }
 }

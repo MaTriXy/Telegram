@@ -1,19 +1,20 @@
 /*
- * This is the source code of Telegram for Android v. 3.x.x.
+ * This is the source code of Telegram for Android v. 5.x.x.
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2018.
  */
 
 package org.telegram.ui;
 
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.app.ProgressDialog;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.SharedPreferences;
+import android.graphics.Canvas;
+import android.graphics.Shader;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.text.Spannable;
 import android.text.method.LinkMovementMethod;
@@ -21,49 +22,62 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
 import android.widget.FrameLayout;
-import android.widget.ListView;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
-import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.R;
+import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.ConnectionsManager;
-import org.telegram.tgnet.RequestDelegate;
-import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
-import org.telegram.ui.Adapters.BaseFragmentAdapter;
+import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeDescription;
+import org.telegram.ui.Cells.ChatMessageCell;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.RadioCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.HintView;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.RecyclerListView;
 
 import java.util.ArrayList;
+import java.util.Collections;
+
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 public class PrivacyControlActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
 
     private ListAdapter listAdapter;
     private View doneButton;
+    private RecyclerListView listView;
+    private MessageCell messageCell;
 
-    private int currentType = 0;
+    private int initialRulesType;
+    private ArrayList<Integer> initialPlus = new ArrayList<>();
+    private ArrayList<Integer> initialMinus = new ArrayList<>();
+
+    private int rulesType;
     private ArrayList<Integer> currentPlus;
     private ArrayList<Integer> currentMinus;
     private int lastCheckedType = -1;
 
-    private boolean isGroup;
+    private int currentType;
 
     private boolean enableAnimation;
 
+    private int messageRow;
     private int sectionRow;
     private int everybodyRow;
     private int myContactsRow;
@@ -83,15 +97,147 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
             try {
                 return super.onTouchEvent(widget, buffer, event);
             } catch (Exception e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
             }
             return false;
         }
     }
 
-    public PrivacyControlActivity(boolean group) {
+    private class MessageCell extends FrameLayout {
+
+        private ChatMessageCell cell;
+        private Drawable backgroundDrawable;
+        private Drawable shadowDrawable;
+        private HintView hintView;
+        private MessageObject messageObject;
+
+        public MessageCell(Context context) {
+            super(context);
+
+            setWillNotDraw(false);
+            setClipToPadding(false);
+
+            shadowDrawable = Theme.getThemedDrawable(context, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow);
+            setPadding(0, AndroidUtilities.dp(11), 0, AndroidUtilities.dp(11));
+
+            int date = (int) (System.currentTimeMillis() / 1000) - 60 * 60;
+
+            TLRPC.User currentUser = MessagesController.getInstance(currentAccount).getUser(UserConfig.getInstance(currentAccount).getClientUserId());
+
+            TLRPC.Message message = new TLRPC.TL_message();
+            message.message = LocaleController.getString("PrivacyForwardsMessageLine", R.string.PrivacyForwardsMessageLine);
+            message.date = date + 60;
+            message.dialog_id = 1;
+            message.flags = 257 + TLRPC.MESSAGE_FLAG_FWD;
+            message.from_id = 0;
+            message.id = 1;
+            message.fwd_from = new TLRPC.TL_messageFwdHeader();
+            message.fwd_from.from_name = ContactsController.formatName(currentUser.first_name, currentUser.last_name);
+            message.media = new TLRPC.TL_messageMediaEmpty();
+            message.out = false;
+            message.to_id = new TLRPC.TL_peerUser();
+            message.to_id.user_id = UserConfig.getInstance(currentAccount).getClientUserId();
+            messageObject = new MessageObject(currentAccount, message, true);
+            messageObject.eventId = 1;
+            messageObject.resetLayout();
+
+            cell = new ChatMessageCell(context);
+            cell.setDelegate(new ChatMessageCell.ChatMessageCellDelegate() {
+
+            });
+            cell.isChat = false;
+            cell.setFullyDraw(true);
+            cell.setMessageObject(messageObject, null, false, false);
+            addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+            hintView = new HintView(context, 1, true);
+            addView(hintView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP, 19, 0, 19, 0));
+        }
+
+        @Override
+        protected void dispatchDraw(Canvas canvas) {
+            super.dispatchDraw(canvas);
+            hintView.showForMessageCell(cell, false);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            Drawable newDrawable = Theme.getCachedWallpaperNonBlocking();
+            if (newDrawable != null) {
+                backgroundDrawable = newDrawable;
+            }
+            if (backgroundDrawable instanceof ColorDrawable) {
+                backgroundDrawable.setBounds(0, 0, getMeasuredWidth(), getMeasuredHeight());
+                backgroundDrawable.draw(canvas);
+            } else if (backgroundDrawable instanceof BitmapDrawable) {
+                BitmapDrawable bitmapDrawable = (BitmapDrawable) backgroundDrawable;
+                if (bitmapDrawable.getTileModeX() == Shader.TileMode.REPEAT) {
+                    canvas.save();
+                    float scale = 2.0f / AndroidUtilities.density;
+                    canvas.scale(scale, scale);
+                    backgroundDrawable.setBounds(0, 0, (int) Math.ceil(getMeasuredWidth() / scale), (int) Math.ceil(getMeasuredHeight() / scale));
+                    backgroundDrawable.draw(canvas);
+                    canvas.restore();
+                } else {
+                    int viewHeight = getMeasuredHeight();
+                    float scaleX = (float) getMeasuredWidth() / (float) backgroundDrawable.getIntrinsicWidth();
+                    float scaleY = (float) (viewHeight) / (float) backgroundDrawable.getIntrinsicHeight();
+                    float scale = scaleX < scaleY ? scaleY : scaleX;
+                    int width = (int) Math.ceil(backgroundDrawable.getIntrinsicWidth() * scale);
+                    int height = (int) Math.ceil(backgroundDrawable.getIntrinsicHeight() * scale);
+                    int x = (getMeasuredWidth() - width) / 2;
+                    int y = (viewHeight - height) / 2;
+                    canvas.save();
+                    canvas.clipRect(0, 0, width, getMeasuredHeight());
+                    backgroundDrawable.setBounds(x, y, x + width, y + height);
+                    backgroundDrawable.draw(canvas);
+                    canvas.restore();
+                }
+            } else {
+                super.onDraw(canvas);
+            }
+
+            shadowDrawable.setBounds(0, 0, getMeasuredWidth(), getMeasuredHeight());
+            shadowDrawable.draw(canvas);
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent ev) {
+            return false;
+        }
+
+        @Override
+        public boolean dispatchTouchEvent(MotionEvent ev) {
+            return false;
+        }
+
+        @Override
+        protected void dispatchSetPressed(boolean pressed) {
+
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            return false;
+        }
+
+        @Override
+        public void invalidate() {
+            super.invalidate();
+            cell.invalidate();
+        }
+    }
+
+    public PrivacyControlActivity(int type) {
+        this(type, false);
+    }
+
+    public PrivacyControlActivity(int type, boolean load) {
         super();
-        isGroup = group;
+        rulesType = type;
+        if (load) {
+            ContactsController.getInstance(currentAccount).loadPrivacySettings();
+        }
     }
 
     @Override
@@ -99,21 +245,35 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
         super.onFragmentCreate();
         checkPrivacy();
         updateRows();
-        NotificationCenter.getInstance().addObserver(this, NotificationCenter.privacyRulesUpdated);
+        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.privacyRulesUpdated);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.emojiDidLoad);
         return true;
     }
 
     @Override
     public void onFragmentDestroy() {
         super.onFragmentDestroy();
-        NotificationCenter.getInstance().removeObserver(this, NotificationCenter.privacyRulesUpdated);
+        NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.privacyRulesUpdated);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.emojiDidLoad);
     }
 
     @Override
     public View createView(Context context) {
+        if (rulesType == 5) {
+            messageCell = new MessageCell(context);
+        }
+
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
-        if (isGroup) {
+        if (rulesType == 5) {
+            actionBar.setTitle(LocaleController.getString("PrivacyForwards", R.string.PrivacyForwards));
+        } else if (rulesType == 4) {
+            actionBar.setTitle(LocaleController.getString("PrivacyProfilePhoto", R.string.PrivacyProfilePhoto));
+        } else if (rulesType == 3) {
+            actionBar.setTitle(LocaleController.getString("PrivacyP2P", R.string.PrivacyP2P));
+        } else if (rulesType == 2) {
+            actionBar.setTitle(LocaleController.getString("Calls", R.string.Calls));
+        } else if (rulesType == 1) {
             actionBar.setTitle(LocaleController.getString("GroupsAndChannels", R.string.GroupsAndChannels));
         } else {
             actionBar.setTitle(LocaleController.getString("PrivacyLastSeen", R.string.PrivacyLastSeen));
@@ -122,157 +282,129 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
             @Override
             public void onItemClick(int id) {
                 if (id == -1) {
-                    finishFragment();
+                    if (checkDiscard()) {
+                        finishFragment();
+                    }
                 } else if (id == done_button) {
-                    if (getParentActivity() == null) {
-                        return;
-                    }
-
-                    if (currentType != 0 && !isGroup) {
-                        final SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
-                        boolean showed = preferences.getBoolean("privacyAlertShowed", false);
-                        if (!showed) {
-                            AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-                            if (isGroup) {
-                                builder.setMessage(LocaleController.getString("WhoCanAddMeInfo", R.string.WhoCanAddMeInfo));
-                            } else {
-                                builder.setMessage(LocaleController.getString("CustomHelp", R.string.CustomHelp));
-                            }
-                            builder.setTitle(LocaleController.getString("AppName", R.string.AppName));
-                            builder.setPositiveButton(LocaleController.getString("OK", R.string.OK), new DialogInterface.OnClickListener() {
-                                @Override
-                                public void onClick(DialogInterface dialogInterface, int i) {
-                                    applyCurrentPrivacySettings();
-                                    preferences.edit().putBoolean("privacyAlertShowed", true).commit();
-                                }
-                            });
-                            builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
-                            showDialog(builder.create());
-                            return;
-                        }
-                    }
-                    applyCurrentPrivacySettings();
+                    processDone();
                 }
             }
         });
 
+        int visibility = doneButton != null ? doneButton.getVisibility() : View.GONE;
         ActionBarMenu menu = actionBar.createMenu();
         doneButton = menu.addItemWithWidth(done_button, R.drawable.ic_done, AndroidUtilities.dp(56));
-        doneButton.setVisibility(View.GONE);
+        doneButton.setVisibility(visibility);
 
         listAdapter = new ListAdapter(context);
 
         fragmentView = new FrameLayout(context);
         FrameLayout frameLayout = (FrameLayout) fragmentView;
-        frameLayout.setBackgroundColor(0xfff0f0f0);
+        frameLayout.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
 
-        ListView listView = new ListView(context);
-        listView.setDivider(null);
-        listView.setDividerHeight(0);
+        listView = new RecyclerListView(context);
+        listView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
         listView.setVerticalScrollBarEnabled(false);
-        listView.setDrawSelectorOnTop(true);
-        frameLayout.addView(listView);
-        FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) listView.getLayoutParams();
-        layoutParams.width = LayoutHelper.MATCH_PARENT;
-        layoutParams.height = LayoutHelper.MATCH_PARENT;
-        layoutParams.gravity = Gravity.TOP;
-        listView.setLayoutParams(layoutParams);
+        frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         listView.setAdapter(listAdapter);
-        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> adapterView, View view, final int i, long l) {
-                if (i == nobodyRow || i == everybodyRow || i == myContactsRow) {
-                    int newType = currentType;
-                    if (i == nobodyRow) {
-                        newType = 1;
-                    } else if (i == everybodyRow) {
-                        newType = 0;
-                    } else if (i == myContactsRow) {
-                        newType = 2;
-                    }
-                    if (newType == currentType) {
-                        return;
-                    }
-                    enableAnimation = true;
-                    doneButton.setVisibility(View.VISIBLE);
-                    lastCheckedType = currentType;
-                    currentType = newType;
-                    updateRows();
-                } else if (i == neverShareRow || i == alwaysShareRow) {
-                    ArrayList<Integer> createFromArray;
-                    if (i == neverShareRow) {
-                        createFromArray = currentMinus;
-                    } else {
-                        createFromArray = currentPlus;
-                    }
-                    if (createFromArray.isEmpty()) {
-                        Bundle args = new Bundle();
-                        args.putBoolean(i == neverShareRow ? "isNeverShare" : "isAlwaysShare", true);
-                        args.putBoolean("isGroup", isGroup);
-                        GroupCreateActivity fragment = new GroupCreateActivity(args);
-                        fragment.setDelegate(new GroupCreateActivity.GroupCreateActivityDelegate() {
-                            @Override
-                            public void didSelectUsers(ArrayList<Integer> ids) {
-                                if (i == neverShareRow) {
-                                    currentMinus = ids;
-                                    for (int a = 0; a < currentMinus.size(); a++) {
-                                        currentPlus.remove(currentMinus.get(a));
-                                    }
-                                } else {
-                                    currentPlus = ids;
-                                    for (int a = 0; a < currentPlus.size(); a++) {
-                                        currentMinus.remove(currentPlus.get(a));
-                                    }
-                                }
-                                doneButton.setVisibility(View.VISIBLE);
-                                lastCheckedType = -1;
-                                listAdapter.notifyDataSetChanged();
+        listView.setOnItemClickListener((view, position) -> {
+            if (position == nobodyRow || position == everybodyRow || position == myContactsRow) {
+                int newType = currentType;
+                if (position == nobodyRow) {
+                    newType = 1;
+                } else if (position == everybodyRow) {
+                    newType = 0;
+                } else if (position == myContactsRow) {
+                    newType = 2;
+                }
+                if (newType == currentType) {
+                    return;
+                }
+                enableAnimation = true;
+                lastCheckedType = currentType;
+                currentType = newType;
+                doneButton.setVisibility(hasChanges() ? View.VISIBLE : View.GONE);
+                updateRows();
+            } else if (position == neverShareRow || position == alwaysShareRow) {
+                ArrayList<Integer> createFromArray;
+                if (position == neverShareRow) {
+                    createFromArray = currentMinus;
+                } else {
+                    createFromArray = currentPlus;
+                }
+                if (createFromArray.isEmpty()) {
+                    Bundle args = new Bundle();
+                    args.putBoolean(position == neverShareRow ? "isNeverShare" : "isAlwaysShare", true);
+                    args.putBoolean("isGroup", rulesType != 0);
+                    GroupCreateActivity fragment = new GroupCreateActivity(args);
+                    fragment.setDelegate(ids -> {
+                        if (position == neverShareRow) {
+                            currentMinus = ids;
+                            for (int a = 0; a < currentMinus.size(); a++) {
+                                currentPlus.remove(currentMinus.get(a));
                             }
-                        });
-                        presentFragment(fragment);
-                    } else {
-                        PrivacyUsersActivity fragment = new PrivacyUsersActivity(createFromArray, isGroup, i == alwaysShareRow);
-                        fragment.setDelegate(new PrivacyUsersActivity.PrivacyActivityDelegate() {
-                            @Override
-                            public void didUpdatedUserList(ArrayList<Integer> ids, boolean added) {
-                                if (i == neverShareRow) {
-                                    currentMinus = ids;
-                                    if (added) {
-                                        for (int a = 0; a < currentMinus.size(); a++) {
-                                            currentPlus.remove(currentMinus.get(a));
-                                        }
-                                    }
-                                } else {
-                                    currentPlus = ids;
-                                    if (added) {
-                                        for (int a = 0; a < currentPlus.size(); a++) {
-                                            currentMinus.remove(currentPlus.get(a));
-                                        }
-                                    }
-                                }
-                                doneButton.setVisibility(View.VISIBLE);
-                                listAdapter.notifyDataSetChanged();
+                        } else {
+                            currentPlus = ids;
+                            for (int a = 0; a < currentPlus.size(); a++) {
+                                currentMinus.remove(currentPlus.get(a));
                             }
-                        });
-                        presentFragment(fragment);
-                    }
+                        }
+                        lastCheckedType = -1;
+                        doneButton.setVisibility(hasChanges() ? View.VISIBLE : View.GONE);
+                        listAdapter.notifyDataSetChanged();
+                    });
+                    presentFragment(fragment);
+                } else {
+                    PrivacyUsersActivity fragment = new PrivacyUsersActivity(createFromArray, rulesType != 0, position == alwaysShareRow);
+                    fragment.setDelegate((ids, added) -> {
+                        if (position == neverShareRow) {
+                            currentMinus = ids;
+                            if (added) {
+                                for (int a = 0; a < currentMinus.size(); a++) {
+                                    currentPlus.remove(currentMinus.get(a));
+                                }
+                            }
+                        } else {
+                            currentPlus = ids;
+                            if (added) {
+                                for (int a = 0; a < currentPlus.size(); a++) {
+                                    currentMinus.remove(currentPlus.get(a));
+                                }
+                            }
+                        }
+                        doneButton.setVisibility(hasChanges() ? View.VISIBLE : View.GONE);
+                        listAdapter.notifyDataSetChanged();
+                    });
+                    presentFragment(fragment);
                 }
             }
         });
+
+        setMessageText();
 
         return fragmentView;
     }
 
     @Override
-    public void didReceivedNotification(int id, Object... args) {
+    public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.privacyRulesUpdated) {
             checkPrivacy();
+        } else if (id == NotificationCenter.emojiDidLoad) {
+            listView.invalidateViews();
         }
     }
 
     private void applyCurrentPrivacySettings() {
         TLRPC.TL_account_setPrivacy req = new TLRPC.TL_account_setPrivacy();
-        if (isGroup) {
+        if (rulesType == 5) {
+            req.key = new TLRPC.TL_inputPrivacyKeyForwards();
+        } else if (rulesType == 4) {
+            req.key = new TLRPC.TL_inputPrivacyKeyProfilePhoto();
+        } else if (rulesType == 3) {
+            req.key = new TLRPC.TL_inputPrivacyKeyPhoneP2P();
+        } else if (rulesType == 2) {
+            req.key = new TLRPC.TL_inputPrivacyKeyPhoneCall();
+        } else if (rulesType == 1) {
             req.key = new TLRPC.TL_inputPrivacyKeyChatInvite();
         } else {
             req.key = new TLRPC.TL_inputPrivacyKeyStatusTimestamp();
@@ -280,9 +412,9 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
         if (currentType != 0 && currentPlus.size() > 0) {
             TLRPC.TL_inputPrivacyValueAllowUsers rule = new TLRPC.TL_inputPrivacyValueAllowUsers();
             for (int a = 0; a < currentPlus.size(); a++) {
-                TLRPC.User user = MessagesController.getInstance().getUser(currentPlus.get(a));
+                TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(currentPlus.get(a));
                 if (user != null) {
-                    TLRPC.InputUser inputUser = MessagesController.getInputUser(user);
+                    TLRPC.InputUser inputUser = MessagesController.getInstance(currentAccount).getInputUser(user);
                     if (inputUser != null) {
                         rule.users.add(inputUser);
                     }
@@ -293,9 +425,9 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
         if (currentType != 1 && currentMinus.size() > 0) {
             TLRPC.TL_inputPrivacyValueDisallowUsers rule = new TLRPC.TL_inputPrivacyValueDisallowUsers();
             for (int a = 0; a < currentMinus.size(); a++) {
-                TLRPC.User user = MessagesController.getInstance().getUser(currentMinus.get(a));
+                TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(currentMinus.get(a));
                 if (user != null) {
-                    TLRPC.InputUser inputUser = MessagesController.getInputUser(user);
+                    TLRPC.InputUser inputUser = MessagesController.getInstance(currentAccount).getInputUser(user);
                     if (inputUser != null) {
                         rule.users.add(inputUser);
                     }
@@ -310,40 +442,30 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
         } else if (currentType == 2) {
             req.rules.add(new TLRPC.TL_inputPrivacyValueAllowContacts());
         }
-        ProgressDialog progressDialog = null;
+        AlertDialog progressDialog = null;
         if (getParentActivity() != null) {
-            progressDialog = new ProgressDialog(getParentActivity());
-            progressDialog.setMessage(LocaleController.getString("Loading", R.string.Loading));
-            progressDialog.setCanceledOnTouchOutside(false);
-            progressDialog.setCancelable(false);
+            progressDialog = new AlertDialog(getParentActivity(), 3);
+            progressDialog.setCanCacnel(false);
             progressDialog.show();
         }
-        final ProgressDialog progressDialogFinal = progressDialog;
-        ConnectionsManager.getInstance().sendRequest(req, new RequestDelegate() {
-            @Override
-            public void run(final TLObject response, final TLRPC.TL_error error) {
-                AndroidUtilities.runOnUIThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            if (progressDialogFinal != null) {
-                                progressDialogFinal.dismiss();
-                            }
-                        } catch (Exception e) {
-                            FileLog.e("tmessages", e);
-                        }
-                        if (error == null) {
-                            finishFragment();
-                            TLRPC.TL_account_privacyRules rules = (TLRPC.TL_account_privacyRules) response;
-                            MessagesController.getInstance().putUsers(rules.users, false);
-                            ContactsController.getInstance().setPrivacyRules(rules.rules, isGroup);
-                        } else {
-                            showErrorAlert();
-                        }
-                    }
-                });
+        final AlertDialog progressDialogFinal = progressDialog;
+        ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            try {
+                if (progressDialogFinal != null) {
+                    progressDialogFinal.dismiss();
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
             }
-        }, ConnectionsManager.RequestFlagFailOnServerErrors);
+            if (error == null) {
+                TLRPC.TL_account_privacyRules privacyRules = (TLRPC.TL_account_privacyRules) response;
+                MessagesController.getInstance(currentAccount).putUsers(privacyRules.users, false);
+                ContactsController.getInstance(currentAccount).setPrivacyRules(privacyRules.rules, rulesType);
+                finishFragment();
+            } else {
+                showErrorAlert();
+            }
+        }), ConnectionsManager.RequestFlagFailOnServerErrors);
     }
 
     private void showErrorAlert() {
@@ -360,45 +482,79 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
     private void checkPrivacy() {
         currentPlus = new ArrayList<>();
         currentMinus = new ArrayList<>();
-        ArrayList<TLRPC.PrivacyRule> privacyRules = ContactsController.getInstance().getPrivacyRules(isGroup);
-        if (privacyRules.size() == 0) {
+        ArrayList<TLRPC.PrivacyRule> privacyRules = ContactsController.getInstance(currentAccount).getPrivacyRules(rulesType);
+        if (privacyRules == null || privacyRules.size() == 0) {
             currentType = 1;
-            return;
-        }
-        int type = -1;
-        for (int a = 0; a < privacyRules.size(); a++) {
-            TLRPC.PrivacyRule rule = privacyRules.get(a);
-            if (rule instanceof TLRPC.TL_privacyValueAllowUsers) {
-                currentPlus.addAll(rule.users);
-            } else if (rule instanceof TLRPC.TL_privacyValueDisallowUsers) {
-                currentMinus.addAll(rule.users);
-            } else if (rule instanceof TLRPC.TL_privacyValueAllowAll) {
-                type = 0;
-            } else if (rule instanceof TLRPC.TL_privacyValueDisallowAll) {
-                type = 1;
-            } else {
-                type = 2;
+        } else {
+            int type = -1;
+            for (int a = 0; a < privacyRules.size(); a++) {
+                TLRPC.PrivacyRule rule = privacyRules.get(a);
+                if (rule instanceof TLRPC.TL_privacyValueAllowUsers) {
+                    currentPlus.addAll(rule.users);
+                } else if (rule instanceof TLRPC.TL_privacyValueDisallowUsers) {
+                    currentMinus.addAll(rule.users);
+                } else if (rule instanceof TLRPC.TL_privacyValueAllowAll) {
+                    type = 0;
+                } else if (rule instanceof TLRPC.TL_privacyValueDisallowAll) {
+                    type = 1;
+                } else {
+                    type = 2;
+                }
+            }
+            if (type == 0 || type == -1 && currentMinus.size() > 0) {
+                currentType = 0;
+            } else if (type == 2 || type == -1 && currentMinus.size() > 0 && currentPlus.size() > 0) {
+                currentType = 2;
+            } else if (type == 1 || type == -1 && currentPlus.size() > 0) {
+                currentType = 1;
+            }
+            if (doneButton != null) {
+                doneButton.setVisibility(View.GONE);
             }
         }
-        if (type == 0 || type == -1 && currentMinus.size() > 0) {
-            currentType = 0;
-        } else if (type == 2 || type == -1 && currentMinus.size() > 0 && currentPlus.size() > 0) {
-            currentType = 2;
-        } else if (type == 1 || type == -1 && currentPlus.size() > 0) {
-            currentType = 1;
-        }
-        if (doneButton != null) {
-            doneButton.setVisibility(View.GONE);
-        }
+        initialPlus.clear();
+        initialMinus.clear();
+        initialRulesType = currentType;
+        initialPlus.addAll(currentPlus);
+        initialMinus.addAll(currentMinus);
+
         updateRows();
+    }
+
+    private boolean hasChanges() {
+        if (initialRulesType != currentType) {
+            return true;
+        }
+        if (initialMinus.size() != currentMinus.size()) {
+            return true;
+        }
+        if (initialPlus.size() != currentPlus.size()) {
+            return true;
+        }
+        Collections.sort(initialPlus);
+        Collections.sort(currentPlus);
+        if (!initialPlus.equals(currentPlus)) {
+            return true;
+        }
+        Collections.sort(initialMinus);
+        Collections.sort(currentMinus);
+        if (!initialMinus.equals(currentMinus)) {
+            return true;
+        }
+        return false;
     }
 
     private void updateRows() {
         rowCount = 0;
+        if (rulesType == 5) {
+            messageRow = rowCount++;
+        } else {
+            messageRow = -1;
+        }
         sectionRow = rowCount++;
         everybodyRow = rowCount++;
         myContactsRow = rowCount++;
-        if (isGroup) {
+        if (rulesType != 0 && rulesType != 2 && rulesType != 3 && rulesType != 5) {
             nobodyRow = -1;
         } else {
             nobodyRow = rowCount++;
@@ -416,8 +572,27 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
             neverShareRow = -1;
         }
         shareDetailRow = rowCount++;
+
+        setMessageText();
+
         if (listAdapter != null) {
             listAdapter.notifyDataSetChanged();
+        }
+    }
+
+    private void setMessageText() {
+        if (messageCell != null) {
+            if (currentType == 0) {
+                messageCell.hintView.setOverrideText(LocaleController.getString("PrivacyForwardsEverybody", R.string.PrivacyForwardsEverybody));
+                messageCell.messageObject.messageOwner.fwd_from.from_id = 1;
+            } else if (currentType == 1) {
+                messageCell.hintView.setOverrideText(LocaleController.getString("PrivacyForwardsNobody", R.string.PrivacyForwardsNobody));
+                messageCell.messageObject.messageOwner.fwd_from.from_id = 0;
+            } else {
+                messageCell.hintView.setOverrideText(LocaleController.getString("PrivacyForwardsContacts", R.string.PrivacyForwardsContacts));
+                messageCell.messageObject.messageOwner.fwd_from.from_id = 1;
+            }
+            messageCell.cell.forceResetMessageObject();
         }
     }
 
@@ -428,7 +603,58 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
         enableAnimation = false;
     }
 
-    private class ListAdapter extends BaseFragmentAdapter {
+    @Override
+    public boolean onBackPressed() {
+        return checkDiscard();
+    }
+
+    private void processDone() {
+        if (getParentActivity() == null) {
+            return;
+        }
+
+        if (currentType != 0 && rulesType == 0) {
+            final SharedPreferences preferences = MessagesController.getGlobalMainSettings();
+            boolean showed = preferences.getBoolean("privacyAlertShowed", false);
+            if (!showed) {
+                AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+                if (rulesType == 1) {
+                    builder.setMessage(LocaleController.getString("WhoCanAddMeInfo", R.string.WhoCanAddMeInfo));
+                } else {
+                    builder.setMessage(LocaleController.getString("CustomHelp", R.string.CustomHelp));
+                }
+                builder.setTitle(LocaleController.getString("AppName", R.string.AppName));
+                builder.setPositiveButton(LocaleController.getString("OK", R.string.OK), (dialogInterface, i) -> {
+                    applyCurrentPrivacySettings();
+                    preferences.edit().putBoolean("privacyAlertShowed", true).commit();
+                });
+                builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
+                showDialog(builder.create());
+                return;
+            }
+        }
+        applyCurrentPrivacySettings();
+    }
+
+    private boolean checkDiscard() {
+        if (doneButton.getVisibility() == View.VISIBLE) {
+            AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+            builder.setTitle(LocaleController.getString("UserRestrictionsApplyChanges", R.string.UserRestrictionsApplyChanges));
+            builder.setMessage(LocaleController.getString("PrivacySettingsChangedAlert", R.string.PrivacySettingsChangedAlert));
+            builder.setPositiveButton(LocaleController.getString("ApplyTheme", R.string.ApplyTheme), (dialogInterface, i) -> processDone());
+            builder.setNegativeButton(LocaleController.getString("PassportDiscard", R.string.PassportDiscard), (dialog, which) -> finishFragment());
+            showDialog(builder.create());
+            return false;
+        }
+        return true;
+    }
+
+    @Override
+    public boolean canBeginSlide() {
+        return checkDiscard();
+    }
+
+    private class ListAdapter extends RecyclerListView.SelectionAdapter {
         private Context mContext;
 
         public ListAdapter(Context context) {
@@ -436,151 +662,231 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
         }
 
         @Override
-        public boolean areAllItemsEnabled() {
-            return false;
+        public boolean isEnabled(RecyclerView.ViewHolder holder) {
+            int position = holder.getAdapterPosition();
+            return position == nobodyRow || position == everybodyRow || position == myContactsRow || position == neverShareRow || position == alwaysShareRow;
         }
 
         @Override
-        public boolean isEnabled(int i) {
-            return i == nobodyRow || i == everybodyRow || i == myContactsRow || i == neverShareRow || i == alwaysShareRow;
-        }
-
-        @Override
-        public int getCount() {
+        public int getItemCount() {
             return rowCount;
         }
 
         @Override
-        public Object getItem(int i) {
-            return null;
-        }
-
-        @Override
-        public long getItemId(int i) {
-            return i;
-        }
-
-        @Override
-        public boolean hasStableIds() {
-            return false;
-        }
-
-        @Override
-        public View getView(int i, View view, ViewGroup viewGroup) {
-            int type = getItemViewType(i);
-            if (type == 0) {
-                if (view == null) {
+        public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            View view;
+            switch (viewType) {
+                case 0:
                     view = new TextSettingsCell(mContext);
-                    view.setBackgroundColor(0xffffffff);
-                }
-                TextSettingsCell textCell = (TextSettingsCell) view;
-                if (i == alwaysShareRow) {
-                    String value;
-                    if (currentPlus.size() != 0) {
-                        value = LocaleController.formatPluralString("Users", currentPlus.size());
-                    } else {
-                        value = LocaleController.getString("EmpryUsersPlaceholder", R.string.EmpryUsersPlaceholder);
-                    }
-                    if (isGroup) {
-                        textCell.setTextAndValue(LocaleController.getString("AlwaysAllow", R.string.AlwaysAllow), value, neverShareRow != -1);
-                    } else {
-                        textCell.setTextAndValue(LocaleController.getString("AlwaysShareWith", R.string.AlwaysShareWith), value, neverShareRow != -1);
-                    }
-                } else if (i == neverShareRow) {
-                    String value;
-                    if (currentMinus.size() != 0) {
-                        value = LocaleController.formatPluralString("Users", currentMinus.size());
-                    } else {
-                        value = LocaleController.getString("EmpryUsersPlaceholder", R.string.EmpryUsersPlaceholder);
-                    }
-                    if (isGroup) {
-                        textCell.setTextAndValue(LocaleController.getString("NeverAllow", R.string.NeverAllow), value, false);
-                    } else {
-                        textCell.setTextAndValue(LocaleController.getString("NeverShareWith", R.string.NeverShareWith), value, false);
-                    }
-                }
-            } else if (type == 1) {
-                if (view == null) {
+                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    break;
+                case 1:
                     view = new TextInfoPrivacyCell(mContext);
-                    view.setBackgroundColor(0xffffffff);
-                }
-                if (i == detailRow) {
-                    if (isGroup) {
-                        ((TextInfoPrivacyCell) view).setText(LocaleController.getString("WhoCanAddMeInfo", R.string.WhoCanAddMeInfo));
-                    } else {
-                        ((TextInfoPrivacyCell) view).setText(LocaleController.getString("CustomHelp", R.string.CustomHelp));
-                    }
-                    view.setBackgroundResource(R.drawable.greydivider);
-                } else if (i == shareDetailRow) {
-                    if (isGroup) {
-                        ((TextInfoPrivacyCell) view).setText(LocaleController.getString("CustomShareInfo", R.string.CustomShareInfo));
-                    } else {
-                        ((TextInfoPrivacyCell) view).setText(LocaleController.getString("CustomShareSettingsHelp", R.string.CustomShareSettingsHelp));
-                    }
-                    view.setBackgroundResource(R.drawable.greydivider_bottom);
-                }
-            } else if (type == 2) {
-                if (view == null) {
+                    break;
+                case 2:
                     view = new HeaderCell(mContext);
-                    view.setBackgroundColor(0xffffffff);
-                }
-                if (i == sectionRow) {
-                    if (isGroup) {
-                        ((HeaderCell) view).setText(LocaleController.getString("WhoCanAddMe", R.string.WhoCanAddMe));
-                    } else {
-                        ((HeaderCell) view).setText(LocaleController.getString("LastSeenTitle", R.string.LastSeenTitle));
-                    }
-                } else if (i == shareSectionRow) {
-                    ((HeaderCell) view).setText(LocaleController.getString("AddExceptions", R.string.AddExceptions));
-                }
-            } else if (type == 3) {
-                if (view == null) {
+                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    break;
+                case 3:
                     view = new RadioCell(mContext);
-                    view.setBackgroundColor(0xffffffff);
-                }
-                RadioCell textCell = (RadioCell) view;
-                int checkedType = 0;
-                if (i == everybodyRow) {
-                    textCell.setText(LocaleController.getString("LastSeenEverybody", R.string.LastSeenEverybody), lastCheckedType == 0, true);
-                    checkedType = 0;
-                } else if (i == myContactsRow) {
-                    textCell.setText(LocaleController.getString("LastSeenContacts", R.string.LastSeenContacts), lastCheckedType == 2, nobodyRow != -1);
-                    checkedType = 2;
-                } else if (i == nobodyRow) {
-                    textCell.setText(LocaleController.getString("LastSeenNobody", R.string.LastSeenNobody), lastCheckedType == 1, false);
-                    checkedType = 1;
-                }
-                if (lastCheckedType == checkedType) {
-                    textCell.setChecked(false, enableAnimation);
-                } else if (currentType == checkedType) {
-                    textCell.setChecked(true, enableAnimation);
-                }
+                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    break;
+                case 4:
+                default:
+                    view = messageCell;
+                    break;
             }
-            return view;
+            return new RecyclerListView.Holder(view);
         }
 
         @Override
-        public int getItemViewType(int i) {
-            if (i == alwaysShareRow || i == neverShareRow) {
+        public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+            switch (holder.getItemViewType()) {
+                case 0:
+                    TextSettingsCell textCell = (TextSettingsCell) holder.itemView;
+                    if (position == alwaysShareRow) {
+                        String value;
+                        if (currentPlus.size() != 0) {
+                            value = LocaleController.formatPluralString("Users", currentPlus.size());
+                        } else {
+                            value = LocaleController.getString("EmpryUsersPlaceholder", R.string.EmpryUsersPlaceholder);
+                        }
+                        if (rulesType != 0) {
+                            textCell.setTextAndValue(LocaleController.getString("AlwaysAllow", R.string.AlwaysAllow), value, neverShareRow != -1);
+                        } else {
+                            textCell.setTextAndValue(LocaleController.getString("AlwaysShareWith", R.string.AlwaysShareWith), value, neverShareRow != -1);
+                        }
+                    } else if (position == neverShareRow) {
+                        String value;
+                        if (currentMinus.size() != 0) {
+                            value = LocaleController.formatPluralString("Users", currentMinus.size());
+                        } else {
+                            value = LocaleController.getString("EmpryUsersPlaceholder", R.string.EmpryUsersPlaceholder);
+                        }
+                        if (rulesType != 0) {
+                            textCell.setTextAndValue(LocaleController.getString("NeverAllow", R.string.NeverAllow), value, false);
+                        } else {
+                            textCell.setTextAndValue(LocaleController.getString("NeverShareWith", R.string.NeverShareWith), value, false);
+                        }
+                    }
+                    break;
+                case 1:
+                    TextInfoPrivacyCell privacyCell = (TextInfoPrivacyCell) holder.itemView;
+                    if (position == detailRow) {
+                        if (rulesType == 5) {
+                            privacyCell.setText(LocaleController.getString("PrivacyForwardsInfo", R.string.PrivacyForwardsInfo));
+                        } else if (rulesType == 4) {
+                            privacyCell.setText(LocaleController.getString("PrivacyProfilePhotoInfo", R.string.PrivacyProfilePhotoInfo));
+                        } else if (rulesType == 3) {
+                            privacyCell.setText(LocaleController.getString("PrivacyCallsP2PHelp", R.string.PrivacyCallsP2PHelp));
+                        } else if (rulesType == 2) {
+                            privacyCell.setText(LocaleController.getString("WhoCanCallMeInfo", R.string.WhoCanCallMeInfo));
+                        } else if (rulesType == 1) {
+                            privacyCell.setText(LocaleController.getString("WhoCanAddMeInfo", R.string.WhoCanAddMeInfo));
+                        } else {
+                            privacyCell.setText(LocaleController.getString("CustomHelp", R.string.CustomHelp));
+                        }
+                        privacyCell.setBackgroundDrawable(Theme.getThemedDrawable(mContext, R.drawable.greydivider, Theme.key_windowBackgroundGrayShadow));
+                    } else if (position == shareDetailRow) {
+                        if (rulesType == 5) {
+                            privacyCell.setText(LocaleController.getString("PrivacyForwardsInfo2", R.string.PrivacyForwardsInfo2));
+                        } else if (rulesType == 4) {
+                            privacyCell.setText(LocaleController.getString("PrivacyProfilePhotoInfo2", R.string.PrivacyProfilePhotoInfo2));
+                        } else if (rulesType == 3) {
+                            privacyCell.setText(LocaleController.getString("CustomP2PInfo", R.string.CustomP2PInfo));
+                        } else if (rulesType == 2) {
+                            privacyCell.setText(LocaleController.getString("CustomCallInfo", R.string.CustomCallInfo));
+                        } else if (rulesType == 1) {
+                            privacyCell.setText(LocaleController.getString("CustomShareInfo", R.string.CustomShareInfo));
+                        } else {
+                            privacyCell.setText(LocaleController.getString("CustomShareSettingsHelp", R.string.CustomShareSettingsHelp));
+                        }
+                        privacyCell.setBackgroundDrawable(Theme.getThemedDrawable(mContext, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                    }
+                    break;
+                case 2:
+                    HeaderCell headerCell = (HeaderCell) holder.itemView;
+                    if (position == sectionRow) {
+                        if (rulesType == 5) {
+                            headerCell.setText(LocaleController.getString("PrivacyForwardsTitle", R.string.PrivacyForwardsTitle));
+                        } else if (rulesType == 4) {
+                            headerCell.setText(LocaleController.getString("PrivacyProfilePhotoTitle", R.string.PrivacyProfilePhotoTitle));
+                        } else if (rulesType == 3) {
+                            headerCell.setText(LocaleController.getString("P2PEnabledWith", R.string.P2PEnabledWith));
+                        } else if (rulesType == 2) {
+                            headerCell.setText(LocaleController.getString("WhoCanCallMe", R.string.WhoCanCallMe));
+                        } else if (rulesType == 1) {
+                            headerCell.setText(LocaleController.getString("WhoCanAddMe", R.string.WhoCanAddMe));
+                        } else {
+                            headerCell.setText(LocaleController.getString("LastSeenTitle", R.string.LastSeenTitle));
+                        }
+                    } else if (position == shareSectionRow) {
+                        headerCell.setText(LocaleController.getString("AddExceptions", R.string.AddExceptions));
+                    }
+                    break;
+                case 3:
+                    RadioCell radioCell = (RadioCell) holder.itemView;
+                    int checkedType = 0;
+                    if (position == everybodyRow) {
+                        if (rulesType == 3) {
+                            radioCell.setText(LocaleController.getString("P2PEverybody", R.string.P2PEverybody), lastCheckedType == 0, true);
+                        } else {
+                            radioCell.setText(LocaleController.getString("LastSeenEverybody", R.string.LastSeenEverybody), lastCheckedType == 0, true);
+                        }
+                        checkedType = 0;
+                    } else if (position == myContactsRow) {
+                        if (rulesType == 3) {
+                            radioCell.setText(LocaleController.getString("P2PContacts", R.string.P2PContacts), lastCheckedType == 2, nobodyRow != -1);
+                        } else {
+                            radioCell.setText(LocaleController.getString("LastSeenContacts", R.string.LastSeenContacts), lastCheckedType == 2, nobodyRow != -1);
+                        }
+                        checkedType = 2;
+                    } else if (position == nobodyRow) {
+                        if (rulesType == 3) {
+                            radioCell.setText(LocaleController.getString("P2PNobody", R.string.P2PNobody), lastCheckedType == 1, false);
+                        } else {
+                            radioCell.setText(LocaleController.getString("LastSeenNobody", R.string.LastSeenNobody), lastCheckedType == 1, false);
+                        }
+                        checkedType = 1;
+                    }
+                    if (lastCheckedType == checkedType) {
+                        radioCell.setChecked(false, enableAnimation);
+                    } else if (currentType == checkedType) {
+                        radioCell.setChecked(true, enableAnimation);
+                    }
+                    break;
+            }
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            if (position == alwaysShareRow || position == neverShareRow) {
                 return 0;
-            } else if (i == shareDetailRow || i == detailRow) {
+            } else if (position == shareDetailRow || position == detailRow) {
                 return 1;
-            } else if (i == sectionRow || i == shareSectionRow) {
+            } else if (position == sectionRow || position == shareSectionRow) {
                 return 2;
-            } else if (i == everybodyRow || i == myContactsRow || i == nobodyRow) {
+            } else if (position == everybodyRow || position == myContactsRow || position == nobodyRow) {
                 return 3;
+            } else if (position == messageRow) {
+                return 4;
             }
             return 0;
         }
+    }
 
-        @Override
-        public int getViewTypeCount() {
-            return 4;
-        }
+    @Override
+    public ThemeDescription[] getThemeDescriptions() {
+        return new ThemeDescription[]{
+                new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR, new Class[]{TextSettingsCell.class, HeaderCell.class, RadioCell.class}, null, null, null, Theme.key_windowBackgroundWhite),
+                new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundGray),
 
-        @Override
-        public boolean isEmpty() {
-            return false;
-        }
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault),
+                new ThemeDescription(listView, ThemeDescription.FLAG_LISTGLOWCOLOR, null, null, null, null, Theme.key_actionBarDefault),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_actionBarDefaultIcon),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_actionBarDefaultTitle),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_actionBarDefaultSelector),
+
+                new ThemeDescription(listView, ThemeDescription.FLAG_SELECTOR, null, null, null, null, Theme.key_listSelector),
+
+                new ThemeDescription(listView, 0, new Class[]{View.class}, Theme.dividerPaint, null, null, Theme.key_divider),
+
+                new ThemeDescription(listView, ThemeDescription.FLAG_BACKGROUNDFILTER, new Class[]{TextInfoPrivacyCell.class}, null, null, null, Theme.key_windowBackgroundGrayShadow),
+
+                new ThemeDescription(listView, 0, new Class[]{TextSettingsCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
+                new ThemeDescription(listView, 0, new Class[]{TextSettingsCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_windowBackgroundWhiteValueText),
+
+                new ThemeDescription(listView, 0, new Class[]{TextInfoPrivacyCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText4),
+
+                new ThemeDescription(listView, 0, new Class[]{HeaderCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlueHeader),
+
+                new ThemeDescription(listView, 0, new Class[]{RadioCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
+                new ThemeDescription(listView, ThemeDescription.FLAG_CHECKBOX, new Class[]{RadioCell.class}, new String[]{"radioButton"}, null, null, null, Theme.key_radioBackground),
+                new ThemeDescription(listView, ThemeDescription.FLAG_CHECKBOXCHECK, new Class[]{RadioCell.class}, new String[]{"radioButton"}, null, null, null, Theme.key_radioBackgroundChecked),
+
+                new ThemeDescription(listView, 0, null, null, new Drawable[]{Theme.chat_msgInDrawable, Theme.chat_msgInMediaDrawable}, null, Theme.key_chat_inBubble),
+                new ThemeDescription(listView, 0, null, null, new Drawable[]{Theme.chat_msgInSelectedDrawable, Theme.chat_msgInMediaSelectedDrawable}, null, Theme.key_chat_inBubbleSelected),
+                new ThemeDescription(listView, 0, null, null, new Drawable[]{Theme.chat_msgInShadowDrawable, Theme.chat_msgInMediaShadowDrawable}, null, Theme.key_chat_inBubbleShadow),
+                new ThemeDescription(listView, 0, null, null, new Drawable[]{Theme.chat_msgOutDrawable, Theme.chat_msgOutMediaDrawable}, null, Theme.key_chat_outBubble),
+                new ThemeDescription(listView, 0, null, null, new Drawable[]{Theme.chat_msgOutSelectedDrawable, Theme.chat_msgOutMediaSelectedDrawable}, null, Theme.key_chat_outBubbleSelected),
+                new ThemeDescription(listView, 0, null, null, new Drawable[]{Theme.chat_msgOutShadowDrawable, Theme.chat_msgOutMediaShadowDrawable}, null, Theme.key_chat_outBubbleShadow),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_messageTextIn),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_messageTextOut),
+                new ThemeDescription(listView, 0, null, null, new Drawable[]{Theme.chat_msgOutCheckDrawable, Theme.chat_msgOutHalfCheckDrawable}, null, Theme.key_chat_outSentCheck),
+                new ThemeDescription(listView, 0, null, null, new Drawable[]{Theme.chat_msgOutCheckSelectedDrawable, Theme.chat_msgOutHalfCheckSelectedDrawable}, null, Theme.key_chat_outSentCheckSelected),
+                new ThemeDescription(listView, 0, null, null, new Drawable[]{Theme.chat_msgMediaCheckDrawable, Theme.chat_msgMediaHalfCheckDrawable}, null, Theme.key_chat_mediaSentCheck),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_inReplyLine),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_outReplyLine),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_inReplyNameText),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_outReplyNameText),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_inReplyMessageText),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_outReplyMessageText),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_inReplyMediaMessageSelectedText),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_outReplyMediaMessageSelectedText),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_inTimeText),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_outTimeText),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_inTimeSelectedText),
+                new ThemeDescription(listView, 0, null, null, null, null, Theme.key_chat_outTimeSelectedText),
+        };
     }
 }

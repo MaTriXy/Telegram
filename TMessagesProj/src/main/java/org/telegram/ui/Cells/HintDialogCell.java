@@ -1,33 +1,33 @@
 /*
- * This is the source code of Telegram for Android v. 3.x.x.
+ * This is the source code of Telegram for Android v. 5.x.x.
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2018.
  */
 
 package org.telegram.ui.Cells;
 
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.drawable.Drawable;
-import android.os.Build;
+import android.graphics.RectF;
 import android.text.Layout;
 import android.text.StaticLayout;
-import android.text.TextPaint;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.ContactsController;
+import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.MessagesController;
-import org.telegram.messenger.R;
+import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.UserObject;
+import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.LayoutHelper;
@@ -37,71 +37,56 @@ public class HintDialogCell extends FrameLayout {
     private BackupImageView imageView;
     private TextView nameTextView;
     private AvatarDrawable avatarDrawable = new AvatarDrawable();
-
-    private static Drawable countDrawable;
-    private static Drawable countDrawableGrey;
-    private static TextPaint countPaint;
+    private RectF rect = new RectF();
 
     private int lastUnreadCount;
     private int countWidth;
     private StaticLayout countLayout;
+    private TLRPC.User currentUser;
 
     private long dialog_id;
+    private int currentAccount = UserConfig.selectedAccount;
 
     public HintDialogCell(Context context) {
         super(context);
-        setBackgroundResource(R.drawable.list_selector);
 
         imageView = new BackupImageView(context);
         imageView.setRoundRadius(AndroidUtilities.dp(27));
         addView(imageView, LayoutHelper.createFrame(54, 54, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 7, 0, 0));
 
         nameTextView = new TextView(context);
-        nameTextView.setTextColor(0xff212121);
+        nameTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         nameTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-        nameTextView.setMaxLines(2);
+        nameTextView.setMaxLines(1);
         nameTextView.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        nameTextView.setLines(2);
+        nameTextView.setLines(1);
         nameTextView.setEllipsize(TextUtils.TruncateAt.END);
         addView(nameTextView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP, 6, 64, 6, 0));
-
-        if (countDrawable == null) {
-            countDrawable = getResources().getDrawable(R.drawable.dialogs_badge);
-            countDrawableGrey = getResources().getDrawable(R.drawable.dialogs_badge2);
-
-            countPaint = new TextPaint(TextPaint.ANTI_ALIAS_FLAG);
-            countPaint.setTextSize(AndroidUtilities.dp(13));
-            countPaint.setColor(0xffffffff);
-            countPaint.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
-        }
     }
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(100), MeasureSpec.EXACTLY));
+        super.onMeasure(MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(86), MeasureSpec.EXACTLY));
     }
 
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        if (Build.VERSION.SDK_INT >= 21 && getBackground() != null) {
-            if (event.getAction() == MotionEvent.ACTION_DOWN || event.getAction() == MotionEvent.ACTION_MOVE) {
-                getBackground().setHotspot(event.getX(), event.getY());
+    public void update(int mask) {
+        if ((mask & MessagesController.UPDATE_MASK_STATUS) != 0) {
+            if (currentUser != null) {
+                currentUser = MessagesController.getInstance(currentAccount).getUser(currentUser.id);
+                imageView.invalidate();
+                invalidate();
             }
         }
-        return super.onTouchEvent(event);
-    }
-
-    public void checkUnreadCounter(int mask) {
         if (mask != 0 && (mask & MessagesController.UPDATE_MASK_READ_DIALOG_MESSAGE) == 0 && (mask & MessagesController.UPDATE_MASK_NEW_MESSAGE) == 0) {
             return;
         }
-        TLRPC.TL_dialog dialog = MessagesController.getInstance().dialogs_dict.get(dialog_id);
+        TLRPC.Dialog dialog = MessagesController.getInstance(currentAccount).dialogs_dict.get(dialog_id);
         if (dialog != null && dialog.unread_count != 0) {
             if (lastUnreadCount != dialog.unread_count) {
                 lastUnreadCount = dialog.unread_count;
                 String countString = String.format("%d", dialog.unread_count);
-                countWidth = Math.max(AndroidUtilities.dp(12), (int) Math.ceil(countPaint.measureText(countString)));
-                countLayout = new StaticLayout(countString, countPaint, countWidth, Layout.Alignment.ALIGN_CENTER, 1.0f, 0.0f, false);
+                countWidth = Math.max(AndroidUtilities.dp(12), (int) Math.ceil(Theme.dialogs_countTextPaint.measureText(countString)));
+                countLayout = new StaticLayout(countString, Theme.dialogs_countTextPaint, countWidth, Layout.Alignment.ALIGN_CENTER, 1.0f, 0.0f, false);
                 if (mask != 0) {
                     invalidate();
                 }
@@ -115,24 +100,34 @@ public class HintDialogCell extends FrameLayout {
         }
     }
 
-    public void setDialog(int uid, boolean checked, CharSequence name) {
-        dialog_id = uid;
+    public void update() {
+        int uid = (int) dialog_id;
         TLRPC.FileLocation photo = null;
         if (uid > 0) {
-            TLRPC.User user = MessagesController.getInstance().getUser(uid);
+            currentUser = MessagesController.getInstance(currentAccount).getUser(uid);
+            avatarDrawable.setInfo(currentUser);
+        } else {
+            TLRPC.Chat chat = MessagesController.getInstance(currentAccount).getChat(-uid);
+            avatarDrawable.setInfo(chat);
+            currentUser = null;
+        }
+    }
+
+    public void setDialog(int uid, boolean counter, CharSequence name) {
+        dialog_id = uid;
+        if (uid > 0) {
+            currentUser = MessagesController.getInstance(currentAccount).getUser(uid);
             if (name != null) {
                 nameTextView.setText(name);
-            } else if (user != null) {
-                nameTextView.setText(ContactsController.formatName(user.first_name, user.last_name));
+            } else if (currentUser != null) {
+                nameTextView.setText(UserObject.getFirstName(currentUser));
             } else {
                 nameTextView.setText("");
             }
-            avatarDrawable.setInfo(user);
-            if (user != null && user.photo != null) {
-                photo = user.photo.photo_small;
-            }
+            avatarDrawable.setInfo(currentUser);
+            imageView.setImage(ImageLocation.getForUser(currentUser, false), "50_50", avatarDrawable, currentUser);
         } else {
-            TLRPC.Chat chat = MessagesController.getInstance().getChat(-uid);
+            TLRPC.Chat chat = MessagesController.getInstance(currentAccount).getChat(-uid);
             if (name != null) {
                 nameTextView.setText(name);
             } else if (chat != null) {
@@ -141,12 +136,14 @@ public class HintDialogCell extends FrameLayout {
                 nameTextView.setText("");
             }
             avatarDrawable.setInfo(chat);
-            if (chat != null && chat.photo != null) {
-                photo = chat.photo.photo_small;
-            }
+            currentUser = null;
+            imageView.setImage(ImageLocation.getForChat(chat, false), "50_50", avatarDrawable, chat);
         }
-        imageView.setImage(photo, "50_50", avatarDrawable);
-        checkUnreadCounter(0);
+        if (counter) {
+            update(0);
+        } else {
+            countLayout = null;
+        }
     }
 
     @Override
@@ -157,17 +154,20 @@ public class HintDialogCell extends FrameLayout {
                 int top = AndroidUtilities.dp(6);
                 int left = AndroidUtilities.dp(54);
                 int x = left - AndroidUtilities.dp(5.5f);
-                if (MessagesController.getInstance().isDialogMuted(dialog_id)) {
-                    countDrawableGrey.setBounds(x, top, x + countWidth + AndroidUtilities.dp(11), top + countDrawableGrey.getIntrinsicHeight());
-                    countDrawableGrey.draw(canvas);
-                } else {
-                    countDrawable.setBounds(x, top, x + countWidth + AndroidUtilities.dp(11), top + countDrawable.getIntrinsicHeight());
-                    countDrawable.draw(canvas);
-                }
+                rect.set(x, top, x + countWidth + AndroidUtilities.dp(11), top + AndroidUtilities.dp(23));
+                canvas.drawRoundRect(rect, 11.5f * AndroidUtilities.density, 11.5f * AndroidUtilities.density, MessagesController.getInstance(currentAccount).isDialogMuted(dialog_id) ? Theme.dialogs_countGrayPaint : Theme.dialogs_countPaint);
                 canvas.save();
                 canvas.translate(left, top + AndroidUtilities.dp(4));
                 countLayout.draw(canvas);
                 canvas.restore();
+            }
+            if (currentUser != null && !currentUser.bot && (currentUser.status != null && currentUser.status.expires > ConnectionsManager.getInstance(currentAccount).getCurrentTime() || MessagesController.getInstance(currentAccount).onlinePrivacy.containsKey(currentUser.id))) {
+                int top = AndroidUtilities.dp(53);
+                int left = AndroidUtilities.dp(59);
+                Theme.dialogs_onlineCirclePaint.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                canvas.drawCircle(left, top, AndroidUtilities.dp(7), Theme.dialogs_onlineCirclePaint);
+                Theme.dialogs_onlineCirclePaint.setColor(Theme.getColor(Theme.key_chats_onlineCircle));
+                canvas.drawCircle(left, top, AndroidUtilities.dp(5), Theme.dialogs_onlineCirclePaint);
             }
         }
         return result;
