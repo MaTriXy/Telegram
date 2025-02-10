@@ -14,6 +14,7 @@ import android.graphics.Paint;
 import android.graphics.drawable.Drawable;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.ui.ActionBar.Theme;
 
 public class MapPlaceholderDrawable extends Drawable {
 
@@ -21,12 +22,22 @@ public class MapPlaceholderDrawable extends Drawable {
     private Paint linePaint;
 
     public MapPlaceholderDrawable() {
+        this(Theme.getCurrentTheme().isDark());
+    }
+
+    public MapPlaceholderDrawable(boolean isDark) {
         super();
         paint = new Paint();
-        paint.setColor(0xffded7d6);
         linePaint = new Paint();
-        linePaint.setColor(0xffc6bfbe);
         linePaint.setStrokeWidth(AndroidUtilities.dp(1));
+
+        if (isDark) {
+            paint.setColor(0xff1d2c4d);
+            linePaint.setColor(0xff0e1626);
+        } else {
+            paint.setColor(0xffded7d6);
+            linePaint.setColor(0xffc6bfbe);
+        }
     }
 
     @Override

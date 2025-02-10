@@ -25,19 +25,25 @@ import androidx.annotation.Nullable;
  */
 public interface Clock {
 
-  /**
-   * Default {@link Clock} to use for all non-test cases.
-   */
+  /** Default {@link Clock} to use for all non-test cases. */
   Clock DEFAULT = new SystemClock();
 
-  /** @see android.os.SystemClock#elapsedRealtime() */
+  /**
+   * Returns the current time in milliseconds since the Unix Epoch.
+   *
+   * @see System#currentTimeMillis()
+   */
+  long currentTimeMillis();
+
+  /**
+   * @see android.os.SystemClock#elapsedRealtime()
+   */
   long elapsedRealtime();
 
-  /** @see android.os.SystemClock#uptimeMillis() */
+  /**
+   * @see android.os.SystemClock#uptimeMillis()
+   */
   long uptimeMillis();
-
-  /** @see android.os.SystemClock#sleep(long) */
-  void sleep(long sleepTimeMs);
 
   /**
    * Creates a {@link HandlerWrapper} using a specified looper and a specified callback for handling
@@ -46,4 +52,12 @@ public interface Clock {
    * @see Handler#Handler(Looper, Handler.Callback)
    */
   HandlerWrapper createHandler(Looper looper, @Nullable Handler.Callback callback);
+
+  /**
+   * Notifies the clock that the current thread is about to be blocked and won't return until a
+   * condition on another thread becomes true.
+   *
+   * <p>Should be a no-op for all non-test cases.
+   */
+  void onThreadBlocked();
 }

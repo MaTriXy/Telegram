@@ -51,7 +51,7 @@ import javax.crypto.spec.SecretKeySpec;
   private final byte[] encryptionKey;
   private final byte[] encryptionIv;
 
-  private @Nullable CipherInputStream cipherInputStream;
+  @Nullable private CipherInputStream cipherInputStream;
 
   /**
    * @param upstream The upstream {@link DataSource}.
@@ -66,6 +66,7 @@ import javax.crypto.spec.SecretKeySpec;
 
   @Override
   public final void addTransferListener(TransferListener transferListener) {
+    Assertions.checkNotNull(transferListener);
     upstream.addTransferListener(transferListener);
   }
 
@@ -95,9 +96,9 @@ import javax.crypto.spec.SecretKeySpec;
   }
 
   @Override
-  public final int read(byte[] buffer, int offset, int readLength) throws IOException {
+  public final int read(byte[] buffer, int offset, int length) throws IOException {
     Assertions.checkNotNull(cipherInputStream);
-    int bytesRead = cipherInputStream.read(buffer, offset, readLength);
+    int bytesRead = cipherInputStream.read(buffer, offset, length);
     if (bytesRead < 0) {
       return C.RESULT_END_OF_INPUT;
     }
@@ -105,7 +106,8 @@ import javax.crypto.spec.SecretKeySpec;
   }
 
   @Override
-  public final @Nullable Uri getUri() {
+  @Nullable
+  public final Uri getUri() {
     return upstream.getUri();
   }
 

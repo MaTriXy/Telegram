@@ -20,25 +20,25 @@ import com.google.android.exoplayer2.extractor.ExtractorInput;
 import java.io.IOException;
 
 /**
- * Event-driven EBML reader that delivers events to an {@link EbmlReaderOutput}.
- * <p>
- * EBML can be summarized as a binary XML format somewhat similar to Protocol Buffers. It was
- * originally designed for the Matroska container format. More information about EBML and
- * Matroska is available <a href="http://www.matroska.org/technical/specs/index.html">here</a>.
+ * Event-driven EBML reader that delivers events to an {@link EbmlProcessor}.
+ *
+ * <p>EBML can be summarized as a binary XML format somewhat similar to Protocol Buffers. It was
+ * originally designed for the Matroska container format. More information about EBML and Matroska
+ * is available <a href="http://www.matroska.org/technical/specs/index.html">here</a>.
  */
 /* package */ interface EbmlReader {
 
   /**
-   * Initializes the extractor with an {@link EbmlReaderOutput}.
+   * Initializes the extractor with an {@link EbmlProcessor}.
    *
-   * @param output An {@link EbmlReaderOutput} to receive events.
+   * @param processor An {@link EbmlProcessor} to process events.
    */
-  void init(EbmlReaderOutput output);
+  void init(EbmlProcessor processor);
 
   /**
    * Resets the state of the reader.
-   * <p>
-   * Subsequent calls to {@link #read(ExtractorInput)} will start reading a new EBML structure
+   *
+   * <p>Subsequent calls to {@link #read(ExtractorInput)} will start reading a new EBML structure
    * from scratch.
    */
   void reset();
@@ -50,8 +50,6 @@ import java.io.IOException;
    * @return True if data can continue to be read. False if the end of the input was encountered.
    * @throws ParserException If parsing fails.
    * @throws IOException If an error occurs reading from the input.
-   * @throws InterruptedException If the thread is interrupted.
    */
-  boolean read(ExtractorInput input) throws IOException, InterruptedException;
-
+  boolean read(ExtractorInput input) throws IOException;
 }

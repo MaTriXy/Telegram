@@ -16,6 +16,7 @@ import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.view.MotionEvent;
 import android.view.SoundEffectConstants;
+import android.view.View;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.DownloadController;
@@ -62,7 +63,7 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
 
         TAG = DownloadController.getInstance(currentAccount).generateObserverTag();
 
-        seekBar = new SeekBar(getContext());
+        seekBar = new SeekBar(this);
         seekBar.setDelegate(this);
         progressView = new ProgressView();
     }
@@ -125,6 +126,14 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
             return;
         }
 
+        int h = AndroidUtilities.displaySize.y;
+        int w = AndroidUtilities.displaySize.x;
+        if (getParent() instanceof View) {
+            View view = (View) getParent();
+            w = view.getMeasuredWidth();
+            h = view.getMeasuredHeight();
+        }
+        Theme.chat_msgInMediaDrawable.setTop((int) getY(), w, h, false, false);
         setDrawableBounds(Theme.chat_msgInMediaDrawable, 0, 0, getMeasuredWidth(), getMeasuredHeight());
         Theme.chat_msgInMediaDrawable.draw(canvas);
 
@@ -142,7 +151,7 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
         }
         canvas.restore();
 
-        int state = buttonState + 5;
+        int state = buttonState;
         timePaint.setColor(0xffa1aab3);
         Drawable buttonDrawable = Theme.chat_fileStatesDrawable[state][buttonPressed];
         int side = AndroidUtilities.dp(36);
@@ -208,8 +217,8 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
     private void didPressedButton() {
         if (buttonState == 0) {
             boolean result = MediaController.getInstance().playMessage(currentMessageObject);
-            if (!currentMessageObject.isOut() && currentMessageObject.isContentUnread()) {
-                if (currentMessageObject.messageOwner.to_id.channel_id == 0) {
+            if (!currentMessageObject.isOut() && (currentMessageObject.isContentUnread())) {
+                if (currentMessageObject.messageOwner.peer_id.channel_id == 0) {
                     MessagesController.getInstance(currentAccount).markMessageContentAsRead(currentMessageObject);
                     currentMessageObject.setContentIsRead();
                 }
@@ -225,7 +234,7 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
                 invalidate();
             }
         } else if (buttonState == 2) {
-            FileLoader.getInstance(currentAccount).loadFile(currentMessageObject.getDocument(), currentMessageObject, 1, 0);
+            FileLoader.getInstance(currentAccount).loadFile(currentMessageObject.getDocument(), currentMessageObject, FileLoader.PRIORITY_NORMAL, 0);
             buttonState = 4;
             invalidate();
         } else if (buttonState == 3) {
@@ -249,14 +258,14 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
             for (int a = 0; a < currentMessageObject.getDocument().attributes.size(); a++) {
                 TLRPC.DocumentAttribute attribute = currentMessageObject.getDocument().attributes.get(a);
                 if (attribute instanceof TLRPC.TL_documentAttributeAudio) {
-                    duration = attribute.duration;
+                    duration = (int) attribute.duration;
                     break;
                 }
             }
         } else {
             duration = currentMessageObject.audioProgressSec;
         }
-        String timeString = String.format("%02d:%02d", duration / 60, duration % 60);
+        String timeString = AndroidUtilities.formatLongDuration(duration);
         if (lastTimeString == null || lastTimeString != null && !lastTimeString.equals(timeString)) {
             timeWidth = (int)Math.ceil(timePaint.measureText(timeString));
             timeLayout = new StaticLayout(timeString, timePaint, timeWidth, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
@@ -266,7 +275,7 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
 
     public void downloadAudioIfNeed() {
         if (buttonState == 2) {
-            FileLoader.getInstance(currentAccount).loadFile(currentMessageObject.getDocument(), currentMessageObject, 1, 0);
+            FileLoader.getInstance(currentAccount).loadFile(currentMessageObject.getDocument(), currentMessageObject, FileLoader.PRIORITY_NORMAL, 0);
             buttonState = 3;
             invalidate();
         }
@@ -274,7 +283,7 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
 
     public void updateButtonState() {
         String fileName = currentMessageObject.getFileName();
-        File cacheFile = FileLoader.getPathToMessage(currentMessageObject.messageOwner);
+        File cacheFile = FileLoader.getInstance(currentAccount).getPathToMessage(currentMessageObject.messageOwner);
         if (cacheFile.exists()) {
             DownloadController.getInstance(currentAccount).removeLoadingFileObserver(this);
             boolean playing = MediaController.getInstance().isPlayingMessage(currentMessageObject);
@@ -313,8 +322,8 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
     }
 
     @Override
-    public void onProgressDownload(String fileName, float progress) {
-        progressView.setProgress(progress);
+    public void onProgressDownload(String fileName, long downloadedSize, long totalSize) {
+        progressView.setProgress(Math.min(1f, downloadedSize / (float) totalSize));
         if (buttonState != 3) {
             updateButtonState();
         }
@@ -322,7 +331,7 @@ public class PopupAudioView extends BaseCell implements SeekBar.SeekBarDelegate,
     }
 
     @Override
-    public void onProgressUpload(String fileName, float progress, boolean isEncrypted) {
+    public void onProgressUpload(String fileName, long uploadedSize, long totalSize, boolean isEncrypted) {
 
     }
 

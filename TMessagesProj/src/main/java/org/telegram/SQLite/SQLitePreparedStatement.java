@@ -8,6 +8,10 @@
 
 package org.telegram.SQLite;
 
+import android.os.SystemClock;
+
+import com.google.android.exoplayer2.util.Log;
+
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.FileLog;
 import org.telegram.tgnet.NativeByteBuffer;
@@ -18,28 +22,26 @@ public class SQLitePreparedStatement {
 
     private boolean isFinalized = false;
     private long sqliteStatementHandle;
-    private boolean finalizeAfterQuery;
 
-    //private static HashMap<SQLitePreparedStatement, String> hashMap;
+    private long startTime;
+    private String query;
 
     public long getStatementHandle() {
         return sqliteStatementHandle;
     }
 
-    public SQLitePreparedStatement(SQLiteDatabase db, String sql, boolean finalize) throws SQLiteException {
-        finalizeAfterQuery = finalize;
+    public SQLitePreparedStatement(SQLiteDatabase db, String sql) throws SQLiteException {
         sqliteStatementHandle = prepare(db.getSQLiteHandle(), sql);
-        /*if (BuildVars.DEBUG_VERSION) {
-            if (hashMap == null) {
-                hashMap = new HashMap<>();
-            }
-            hashMap.put(this, sql);
-            for (HashMap.Entry<SQLitePreparedStatement, String> entry : hashMap.entrySet()) {
-                if (BuildVars.LOGS_ENABLED) {
-                    FileLog.d("exist entry = " + entry.getValue());
+        if (BuildVars.LOGS_ENABLED) {
+            query = sql;
+            startTime = SystemClock.elapsedRealtime();
+            /*if (BuildVars.DEBUG_PRIVATE_VERSION) {
+                if (hashMap == null) {
+                    hashMap = new HashMap<>();
                 }
-            }
-        }*/
+                hashMap.put(this, sql);
+            }*/
+        }
     }
 
 
@@ -89,9 +91,7 @@ public class SQLitePreparedStatement {
     }
 
     public void dispose() {
-        if (finalizeAfterQuery) {
-            finalizeQuery();
-        }
+        finalizeQuery();
     }
 
     void checkFinalized() throws SQLiteException {
@@ -104,10 +104,13 @@ public class SQLitePreparedStatement {
         if (isFinalized) {
             return;
         }
+        if (BuildVars.LOGS_ENABLED) {
+            long diff = SystemClock.elapsedRealtime() - startTime;
+            if (diff > 500) {
+                FileLog.d("sqlite query " + query + " took " + diff + "ms");
+            }
+        }
         try {
-            /*if (BuildVars.DEBUG_VERSION) {
-                hashMap.remove(this);
-            }*/
             isFinalized = true;
             finalize(sqliteStatementHandle);
         } catch (SQLiteException e) {

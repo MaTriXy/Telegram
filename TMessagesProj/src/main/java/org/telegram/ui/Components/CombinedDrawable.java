@@ -8,9 +8,12 @@
 
 package org.telegram.ui.Components;
 
+import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+
 import androidx.annotation.NonNull;
 
 public class CombinedDrawable extends Drawable implements Drawable.Callback {
@@ -23,9 +26,13 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
     private int iconHeight;
     private int backWidth;
     private int backHeight;
+    private boolean center;
     private int offsetX;
     private int offsetY;
     private boolean fullSize;
+    private boolean both;
+
+    public float translateX, translateY;
 
     public CombinedDrawable(Drawable backgroundDrawable, Drawable iconDrawable, int leftOffset, int topOffset) {
         background = backgroundDrawable;
@@ -42,6 +49,15 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
         iconHeight = height;
     }
 
+    public CombinedDrawable(Context context, int backgroundDrawableResId, int iconDrawableResId) {
+        background = context.getResources().getDrawable(backgroundDrawableResId);
+        icon = context.getResources().getDrawable(iconDrawableResId);
+        if (icon != null) {
+            icon.setCallback(this);
+        }
+        both = true;
+    }
+
     public CombinedDrawable(Drawable backgroundDrawable, Drawable iconDrawable) {
         background = backgroundDrawable;
         icon = iconDrawable;
@@ -50,9 +66,23 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
         }
     }
 
+    public void setBackgroundDrawable(Drawable backgroundDrawable) {
+        background = backgroundDrawable;
+        invalidateSelf();
+    }
+
+    public void setIconDrawable(Drawable iconDrawable) {
+        icon = iconDrawable;
+        invalidateSelf();
+    }
+
     public void setCustomSize(int width, int height) {
         backWidth = width;
         backHeight = height;
+    }
+
+    public void setCenter(boolean value) {
+        center = value;
     }
 
     public void setIconOffset(int x, int y) {
@@ -75,6 +105,9 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
     @Override
     public void setColorFilter(ColorFilter colorFilter) {
         icon.setColorFilter(colorFilter);
+        if (both) {
+            background.setColorFilter(colorFilter);
+        }
     }
 
     @Override
@@ -110,14 +143,32 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
 
     @Override
     public void draw(Canvas canvas) {
-        background.setBounds(getBounds());
-        background.draw(canvas);
+        canvas.save();
+        canvas.translate(translateX, translateY);
+        if (center) {
+            Rect bounds = getBounds();
+            setBounds(
+                bounds.centerX() - getIntrinsicWidth() / 2,
+                bounds.centerY() - getIntrinsicHeight() / 2,
+                bounds.centerX() + getIntrinsicWidth() / 2,
+                bounds.centerY() + getIntrinsicHeight() / 2
+            );
+        }
+        if (background != null) {
+            background.setBounds(getBounds());
+            background.draw(canvas);
+        }
         if (icon != null) {
-            int x;
-            int y;
             if (fullSize) {
-                icon.setBounds(getBounds());
+                android.graphics.Rect bounds = getBounds();
+                if (left != 0) {
+                    icon.setBounds(bounds.left + left, bounds.top + top, bounds.right - left, bounds.bottom - top);
+                } else {
+                    icon.setBounds(bounds);
+                }
             } else {
+                int x;
+                int y;
                 if (iconWidth != 0) {
                     x = getBounds().centerX() - iconWidth / 2 + left + offsetX;
                     y = getBounds().centerY() - iconHeight / 2 + top + offsetY;
@@ -130,6 +181,7 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
             }
             icon.draw(canvas);
         }
+        canvas.restore();
     }
 
     @Override
@@ -176,5 +228,9 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
     @Override
     public void unscheduleDrawable(@NonNull Drawable who, @NonNull Runnable what) {
         unscheduleSelf(what);
+    }
+
+    public Drawable getBackgroundDrawable() {
+        return background;
     }
 }

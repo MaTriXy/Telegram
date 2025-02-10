@@ -15,6 +15,7 @@
  */
 package com.google.android.exoplayer2.extractor.ogg;
 
+import androidx.annotation.Nullable;
 import com.google.android.exoplayer2.extractor.ExtractorInput;
 import com.google.android.exoplayer2.extractor.SeekMap;
 import java.io.IOException;
@@ -27,33 +28,30 @@ import java.io.IOException;
 /* package */ interface OggSeeker {
 
   /**
-   * Returns a {@link SeekMap} that returns an initial estimated position for progressive seeking
-   * or the final position for direct seeking. Returns null if {@link #read} has yet to return -1.
+   * Returns a {@link SeekMap} that returns an initial estimated position for progressive seeking or
+   * the final position for direct seeking. Returns null if {@link #read} has yet to return -1.
    */
+  @Nullable
   SeekMap createSeekMap();
 
   /**
-   * Initializes a seek operation.
+   * Starts a seek operation.
    *
-   * @param timeUs The seek position in microseconds.
-   * @return The granule position targeted by the seek.
+   * @param targetGranule The target granule position.
    */
-  long startSeek(long timeUs);
+  void startSeek(long targetGranule);
 
   /**
-   * Reads data from the {@link ExtractorInput} to build the {@link SeekMap} or to continue a
-   * progressive seek.
-   * <p/>
-   * If more data is required or if the position of the input needs to be modified then a position
-   * from which data should be provided is returned. Else a negative value is returned. If a seek
-   * has been completed then the value returned is -(currentGranule + 2). Else it is -1.
+   * Reads data from the {@link ExtractorInput} to build the {@link SeekMap} or to continue a seek.
+   *
+   * <p>If more data is required or if the position of the input needs to be modified then a
+   * position from which data should be provided is returned. Else a negative value is returned. If
+   * a seek has been completed then the value returned is -(currentGranule + 2). Else it is -1.
    *
    * @param input The {@link ExtractorInput} to read from.
    * @return A non-negative position to seek the {@link ExtractorInput} to, or -(currentGranule + 2)
    *     if the progressive seek has completed, or -1 otherwise.
    * @throws IOException If reading from the {@link ExtractorInput} fails.
-   * @throws InterruptedException If the thread is interrupted.
    */
-  long read(ExtractorInput input) throws IOException, InterruptedException;
-
+  long read(ExtractorInput input) throws IOException;
 }

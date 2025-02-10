@@ -15,19 +15,16 @@
  */
 package com.google.android.exoplayer2.extractor.flv;
 
-import android.util.Pair;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.ParserException;
+import com.google.android.exoplayer2.audio.AacUtil;
 import com.google.android.exoplayer2.extractor.TrackOutput;
-import com.google.android.exoplayer2.util.CodecSpecificDataUtil;
 import com.google.android.exoplayer2.util.MimeTypes;
 import com.google.android.exoplayer2.util.ParsableByteArray;
 import java.util.Collections;
 
-/**
- * Parses audio tags from an FLV stream and extracts AAC frames.
- */
+/** Parses audio tags from an FLV stream and extracts AAC frames. */
 /* package */ final class AudioTagPayloadReader extends TagPayloadReader {
 
   private static final int AUDIO_FORMAT_MP3 = 2;
@@ -62,16 +59,23 @@ import java.util.Collections;
       if (audioFormat == AUDIO_FORMAT_MP3) {
         int sampleRateIndex = (header >> 2) & 0x03;
         int sampleRate = AUDIO_SAMPLING_RATE_TABLE[sampleRateIndex];
-        Format format = Format.createAudioSampleFormat(null, MimeTypes.AUDIO_MPEG, null,
-            Format.NO_VALUE, Format.NO_VALUE, 1, sampleRate, null, null, 0, null);
+        Format format =
+            new Format.Builder()
+                .setSampleMimeType(MimeTypes.AUDIO_MPEG)
+                .setChannelCount(1)
+                .setSampleRate(sampleRate)
+                .build();
         output.format(format);
         hasOutputFormat = true;
       } else if (audioFormat == AUDIO_FORMAT_ALAW || audioFormat == AUDIO_FORMAT_ULAW) {
-        String type = audioFormat == AUDIO_FORMAT_ALAW ? MimeTypes.AUDIO_ALAW
-            : MimeTypes.AUDIO_MLAW;
-        int pcmEncoding = (header & 0x01) == 1 ? C.ENCODING_PCM_16BIT : C.ENCODING_PCM_8BIT;
-        Format format = Format.createAudioSampleFormat(null, type, null, Format.NO_VALUE,
-            Format.NO_VALUE, 1, 8000, pcmEncoding, null, null, 0, null);
+        String mimeType =
+            audioFormat == AUDIO_FORMAT_ALAW ? MimeTypes.AUDIO_ALAW : MimeTypes.AUDIO_MLAW;
+        Format format =
+            new Format.Builder()
+                .setSampleMimeType(mimeType)
+                .setChannelCount(1)
+                .setSampleRate(8000)
+                .build();
         output.format(format);
         hasOutputFormat = true;
       } else if (audioFormat != AUDIO_FORMAT_AAC) {
@@ -86,30 +90,38 @@ import java.util.Collections;
   }
 
   @Override
-  protected void parsePayload(ParsableByteArray data, long timeUs) throws ParserException {
+  protected boolean parsePayload(ParsableByteArray data, long timeUs) throws ParserException {
     if (audioFormat == AUDIO_FORMAT_MP3) {
       int sampleSize = data.bytesLeft();
       output.sampleData(data, sampleSize);
       output.sampleMetadata(timeUs, C.BUFFER_FLAG_KEY_FRAME, sampleSize, 0, null);
+      return true;
     } else {
       int packetType = data.readUnsignedByte();
       if (packetType == AAC_PACKET_TYPE_SEQUENCE_HEADER && !hasOutputFormat) {
         // Parse the sequence header.
         byte[] audioSpecificConfig = new byte[data.bytesLeft()];
         data.readBytes(audioSpecificConfig, 0, audioSpecificConfig.length);
-        Pair<Integer, Integer> audioParams = CodecSpecificDataUtil.parseAacAudioSpecificConfig(
-            audioSpecificConfig);
-        Format format = Format.createAudioSampleFormat(null, MimeTypes.AUDIO_AAC, null,
-            Format.NO_VALUE, Format.NO_VALUE, audioParams.second, audioParams.first,
-            Collections.singletonList(audioSpecificConfig), null, 0, null);
+        AacUtil.Config aacConfig = AacUtil.parseAudioSpecificConfig(audioSpecificConfig);
+        Format format =
+            new Format.Builder()
+                .setSampleMimeType(MimeTypes.AUDIO_AAC)
+                .setCodecs(aacConfig.codecs)
+                .setChannelCount(aacConfig.channelCount)
+                .setSampleRate(aacConfig.sampleRateHz)
+                .setInitializationData(Collections.singletonList(audioSpecificConfig))
+                .build();
         output.format(format);
         hasOutputFormat = true;
+        return false;
       } else if (audioFormat != AUDIO_FORMAT_AAC || packetType == AAC_PACKET_TYPE_AAC_RAW) {
         int sampleSize = data.bytesLeft();
         output.sampleData(data, sampleSize);
         output.sampleMetadata(timeUs, C.BUFFER_FLAG_KEY_FRAME, sampleSize, 0, null);
+        return true;
+      } else {
+        return false;
       }
     }
   }
-
 }

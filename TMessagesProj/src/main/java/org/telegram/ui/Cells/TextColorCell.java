@@ -16,6 +16,7 @@ import android.graphics.Paint;
 import androidx.annotation.Keep;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
@@ -28,43 +29,36 @@ import java.util.ArrayList;
 
 public class TextColorCell extends FrameLayout {
 
+    private Theme.ResourcesProvider resourcesProvider;
     private TextView textView;
     private boolean needDivider;
     private int currentColor;
-    private float alpha = 1.0f;
 
     private static Paint colorPaint;
 
-    public final static int colors[] = new int[] {0xfff04444, 0xffff8e01, 0xffffce1f, 0xff79d660, 0xff40edf6, 0xff46beff, 0xffd274f9, 0xffff4f96, 0xffbbbbbb};
-    public final static int colorsToSave[] = new int[] {0xffff0000, 0xffff8e01, 0xffffff00, 0xff00ff00, 0xff00ffff, 0xff0000ff, 0xffd274f9, 0xffff00ff, 0xffffffff};
+    public final static int[] colors = new int[] {0xfff04444, 0xffff8e01, 0xffffce1f, 0xff79d660, 0xff40edf6, 0xff46beff, 0xffd274f9, 0xffff4f96, 0xffbbbbbb};
+    public final static int[] colorsToSave = new int[] {0xffff0000, 0xffff8e01, 0xffffff00, 0xff00ff00, 0xff00ffff, 0xff0000ff, 0xffd274f9, 0xffff00ff, 0xffffffff};
 
     public TextColorCell(Context context) {
+        this(context, null);
+    }
+
+    public TextColorCell(Context context, Theme.ResourcesProvider resourcesProvider) {
         super(context);
+        this.resourcesProvider = resourcesProvider;
 
         if (colorPaint == null) {
             colorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         }
 
         textView = new TextView(context);
-        textView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        textView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         textView.setLines(1);
         textView.setMaxLines(1);
         textView.setSingleLine(true);
         textView.setGravity((LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.CENTER_VERTICAL);
         addView(textView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.TOP, 21, 0, 21, 0));
-    }
-
-    @Keep
-    @Override
-    public void setAlpha(float value) {
-        alpha = value;
-        invalidate();
-    }
-
-    @Override
-    public float getAlpha() {
-        return alpha;
     }
 
     @Override
@@ -83,8 +77,8 @@ public class TextColorCell extends FrameLayout {
     public void setEnabled(boolean value, ArrayList<Animator> animators) {
         super.setEnabled(value);
         if (animators != null) {
-            animators.add(ObjectAnimator.ofFloat(textView, "alpha", value ? 1.0f : 0.5f));
-            animators.add(ObjectAnimator.ofFloat(this, "alpha", value ? 1.0f : 0.5f));
+            animators.add(ObjectAnimator.ofFloat(textView, View.ALPHA, value ? 1.0f : 0.5f));
+            animators.add(ObjectAnimator.ofFloat(this, View.ALPHA, value ? 1.0f : 0.5f));
         } else {
             textView.setAlpha(value ? 1.0f : 0.5f);
             setAlpha(value ? 1.0f : 0.5f);
@@ -98,7 +92,6 @@ public class TextColorCell extends FrameLayout {
         }
         if (currentColor != 0) {
             colorPaint.setColor(currentColor);
-            colorPaint.setAlpha((int) (255 * alpha));
             canvas.drawCircle(LocaleController.isRTL ? AndroidUtilities.dp(33) : getMeasuredWidth() - AndroidUtilities.dp(33), getMeasuredHeight() / 2, AndroidUtilities.dp(10), colorPaint);
         }
     }

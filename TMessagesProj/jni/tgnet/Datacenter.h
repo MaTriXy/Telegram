@@ -12,13 +12,13 @@
 #include <stdint.h>
 #include <vector>
 #include <map>
-#include <bits/unique_ptr.h>
 #include "Defines.h"
 
 class TL_future_salt;
 class Connection;
 class NativeByteBuffer;
 class TL_future_salt;
+class TL_future_salts;
 class TL_help_configSimple;
 class ByteArray;
 class TLObject;
@@ -40,11 +40,11 @@ public:
     void replaceAddresses(std::vector<TcpAddress> &newAddresses, uint32_t flags);
     void serializeToStream(NativeByteBuffer *stream);
     void clearAuthKey(HandshakeType type);
-    void clearServerSalts();
-    int64_t getServerSalt();
-    void mergeServerSalts(std::vector<std::unique_ptr<TL_future_salt>> &salts);
-    void addServerSalt(std::unique_ptr<TL_future_salt> &serverSalt);
-    bool containsServerSalt(int64_t value);
+    void clearServerSalts(bool media);
+    int64_t getServerSalt(bool media);
+    void mergeServerSalts(TL_future_salts *newSalts, bool media);
+    void addServerSalt(std::unique_ptr<TL_future_salt> &serverSalt, bool media);
+    bool containsServerSalt(int64_t value, bool media);
     void suspendConnections(bool suspendPush);
     void getSessions(std::vector<int64_t> &sessions);
     void recreateSessions(HandshakeType type);
@@ -54,9 +54,11 @@ public:
     bool isHandshaking(HandshakeType type);
     bool hasAuthKey(ConnectionType connectionTyoe, int32_t allowPendingKey);
     bool hasPermanentAuthKey();
+    int64_t getPermanentAuthKeyId();
     bool isExportingAuthorization();
     bool hasMediaAddress();
     void resetInitVersion();
+    bool isRepeatCheckingAddresses();
 
     Connection *getDownloadConnection(uint8_t num, bool create);
     Connection *getProxyConnection(uint8_t num, bool create, bool connect);
@@ -67,7 +69,7 @@ public:
     Connection *getTempConnection(bool create);
     Connection *getConnectionByType(uint32_t connectionType, bool create, int32_t allowPendingKey);
 
-    static inline void aesIgeEncryption(uint8_t *buffer, uint8_t *key, uint8_t *iv, bool encrypt, bool changeIv, uint32_t length);
+    static void aesIgeEncryption(uint8_t *buffer, uint8_t *key, uint8_t *iv, bool encrypt, bool changeIv, uint32_t length);
 
 private:
     void onHandshakeConnectionClosed(Connection *connection);
@@ -101,6 +103,7 @@ private:
     std::vector<TcpAddress> addressesIpv6Download;
     std::vector<TcpAddress> addressesIpv4Temp;
     std::vector<std::unique_ptr<TL_future_salt>> serverSalts;
+    std::vector<std::unique_ptr<TL_future_salt>> mediaServerSalts;
     uint32_t currentPortNumIpv4 = 0;
     uint32_t currentAddressNumIpv4 = 0;
     uint32_t currentPortNumIpv4Temp = 0;
@@ -119,10 +122,11 @@ private:
     int64_t authKeyMediaTempId = 0;
     Config *config = nullptr;
     bool isCdnDatacenter = false;
+    bool repeatCheckingAddresses = false;
 
     std::vector<std::unique_ptr<Handshake>> handshakes;
 
-    const uint32_t configVersion = 10;
+    const uint32_t configVersion = 13;
     const uint32_t paramsConfigVersion = 1;
 
     Connection *createProxyConnection(uint8_t num);

@@ -15,6 +15,9 @@
  */
 package com.google.android.exoplayer2.util;
 
+import static com.google.android.exoplayer2.util.Assertions.checkNotNull;
+import static java.lang.annotation.ElementType.TYPE_USE;
+
 import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -27,8 +30,9 @@ import androidx.annotation.StringRes;
 import java.lang.annotation.Documented;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
-/** Utility methods for displaying {@link android.app.Notification}s. */
+/** Utility methods for displaying {@link Notification Notifications}. */
 @SuppressLint("InlinedApi")
 public final class NotificationUtil {
 
@@ -39,6 +43,7 @@ public final class NotificationUtil {
    */
   @Documented
   @Retention(RetentionPolicy.SOURCE)
+  @Target(TYPE_USE)
   @IntDef({
     IMPORTANCE_UNSPECIFIED,
     IMPORTANCE_NONE,
@@ -48,17 +53,29 @@ public final class NotificationUtil {
     IMPORTANCE_HIGH
   })
   public @interface Importance {}
-  /** @see NotificationManager#IMPORTANCE_UNSPECIFIED */
+  /**
+   * @see NotificationManager#IMPORTANCE_UNSPECIFIED
+   */
   public static final int IMPORTANCE_UNSPECIFIED = NotificationManager.IMPORTANCE_UNSPECIFIED;
-  /** @see NotificationManager#IMPORTANCE_NONE */
+  /**
+   * @see NotificationManager#IMPORTANCE_NONE
+   */
   public static final int IMPORTANCE_NONE = NotificationManager.IMPORTANCE_NONE;
-  /** @see NotificationManager#IMPORTANCE_MIN */
+  /**
+   * @see NotificationManager#IMPORTANCE_MIN
+   */
   public static final int IMPORTANCE_MIN = NotificationManager.IMPORTANCE_MIN;
-  /** @see NotificationManager#IMPORTANCE_LOW */
+  /**
+   * @see NotificationManager#IMPORTANCE_LOW
+   */
   public static final int IMPORTANCE_LOW = NotificationManager.IMPORTANCE_LOW;
-  /** @see NotificationManager#IMPORTANCE_DEFAULT */
+  /**
+   * @see NotificationManager#IMPORTANCE_DEFAULT
+   */
   public static final int IMPORTANCE_DEFAULT = NotificationManager.IMPORTANCE_DEFAULT;
-  /** @see NotificationManager#IMPORTANCE_HIGH */
+  /**
+   * @see NotificationManager#IMPORTANCE_HIGH
+   */
   public static final int IMPORTANCE_HIGH = NotificationManager.IMPORTANCE_HIGH;
 
   /**
@@ -66,25 +83,38 @@ public final class NotificationUtil {
    * NotificationChannel} and {@link
    * NotificationManager#createNotificationChannel(NotificationChannel)} for details.
    *
-   * @param context A {@link Context} to retrieve {@link NotificationManager}.
-   * @param id The id of the channel. Must be unique per package. The value may be truncated if it
-   *     is too long.
-   * @param name A string resource identifier for the user visible name of the channel. You can
-   *     rename this channel when the system locale changes by listening for the {@link
-   *     Intent#ACTION_LOCALE_CHANGED} broadcast. The recommended maximum length is 40 characters;
-   *     the value may be truncated if it is too long.
+   * @param context A {@link Context}.
+   * @param id The id of the channel. Must be unique per package. The value may be truncated if it's
+   *     too long.
+   * @param nameResourceId A string resource identifier for the user visible name of the channel.
+   *     The recommended maximum length is 40 characters. The string may be truncated if it's too
+   *     long. You can rename the channel when the system locale changes by listening for the {@link
+   *     Intent#ACTION_LOCALE_CHANGED} broadcast.
+   * @param descriptionResourceId A string resource identifier for the user visible description of
+   *     the channel, or 0 if no description is provided. The recommended maximum length is 300
+   *     characters. The value may be truncated if it is too long. You can change the description of
+   *     the channel when the system locale changes by listening for the {@link
+   *     Intent#ACTION_LOCALE_CHANGED} broadcast.
    * @param importance The importance of the channel. This controls how interruptive notifications
    *     posted to this channel are. One of {@link #IMPORTANCE_UNSPECIFIED}, {@link
    *     #IMPORTANCE_NONE}, {@link #IMPORTANCE_MIN}, {@link #IMPORTANCE_LOW}, {@link
    *     #IMPORTANCE_DEFAULT} and {@link #IMPORTANCE_HIGH}.
    */
   public static void createNotificationChannel(
-      Context context, String id, @StringRes int name, @Importance int importance) {
+      Context context,
+      String id,
+      @StringRes int nameResourceId,
+      @StringRes int descriptionResourceId,
+      @Importance int importance) {
     if (Util.SDK_INT >= 26) {
       NotificationManager notificationManager =
-          (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+          checkNotNull(
+              (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE));
       NotificationChannel channel =
-          new NotificationChannel(id, context.getString(name), importance);
+          new NotificationChannel(id, context.getString(nameResourceId), importance);
+      if (descriptionResourceId != 0) {
+        channel.setDescription(context.getString(descriptionResourceId));
+      }
       notificationManager.createNotificationChannel(channel);
     }
   }
@@ -92,17 +122,17 @@ public final class NotificationUtil {
   /**
    * Post a notification to be shown in the status bar. If a notification with the same id has
    * already been posted by your application and has not yet been canceled, it will be replaced by
-   * the updated information. If {@code notification} is null, then cancels a previously shown
-   * notification.
+   * the updated information. If {@code notification} is {@code null} then any notification
+   * previously shown with the specified id will be cancelled.
    *
-   * @param context A {@link Context} to retrieve {@link NotificationManager}.
-   * @param id An identifier for this notification unique within your application.
-   * @param notification A {@link Notification} object describing what to show the user. If null,
-   *     then cancels a previously shown notification.
+   * @param context A {@link Context}.
+   * @param id The notification id.
+   * @param notification The {@link Notification} to post, or {@code null} to cancel a previously
+   *     shown notification.
    */
   public static void setNotification(Context context, int id, @Nullable Notification notification) {
     NotificationManager notificationManager =
-        (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        checkNotNull((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE));
     if (notification != null) {
       notificationManager.notify(id, notification);
     } else {

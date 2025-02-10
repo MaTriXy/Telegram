@@ -16,14 +16,10 @@
 package com.google.android.exoplayer2.upstream.cache;
 
 import com.google.android.exoplayer2.C;
-import com.google.android.exoplayer2.upstream.cache.Cache.CacheException;
-import java.util.Comparator;
 import java.util.TreeSet;
 
-/**
- * Evicts least recently used cache files first.
- */
-public final class LeastRecentlyUsedCacheEvictor implements CacheEvictor, Comparator<CacheSpan> {
+/** Evicts least recently used cache files first. */
+public final class LeastRecentlyUsedCacheEvictor implements CacheEvictor {
 
   private final long maxBytes;
   private final TreeSet<CacheSpan> leastRecentlyUsed;
@@ -32,7 +28,12 @@ public final class LeastRecentlyUsedCacheEvictor implements CacheEvictor, Compar
 
   public LeastRecentlyUsedCacheEvictor(long maxBytes) {
     this.maxBytes = maxBytes;
-    this.leastRecentlyUsed = new TreeSet<>(this);
+    this.leastRecentlyUsed = new TreeSet<>(LeastRecentlyUsedCacheEvictor::compare);
+  }
+
+  @Override
+  public boolean requiresCacheSpanTouches() {
+    return true;
   }
 
   @Override
@@ -66,24 +67,18 @@ public final class LeastRecentlyUsedCacheEvictor implements CacheEvictor, Compar
     onSpanAdded(cache, newSpan);
   }
 
-  @Override
-  public int compare(CacheSpan lhs, CacheSpan rhs) {
-    long lastAccessTimestampDelta = lhs.lastAccessTimestamp - rhs.lastAccessTimestamp;
-    if (lastAccessTimestampDelta == 0) {
+  private void evictCache(Cache cache, long requiredSpace) {
+    while (currentSize + requiredSpace > maxBytes && !leastRecentlyUsed.isEmpty()) {
+      cache.removeSpan(leastRecentlyUsed.first());
+    }
+  }
+
+  private static int compare(CacheSpan lhs, CacheSpan rhs) {
+    long lastTouchTimestampDelta = lhs.lastTouchTimestamp - rhs.lastTouchTimestamp;
+    if (lastTouchTimestampDelta == 0) {
       // Use the standard compareTo method as a tie-break.
       return lhs.compareTo(rhs);
     }
-    return lhs.lastAccessTimestamp < rhs.lastAccessTimestamp ? -1 : 1;
+    return lhs.lastTouchTimestamp < rhs.lastTouchTimestamp ? -1 : 1;
   }
-
-  private void evictCache(Cache cache, long requiredSpace) {
-    while (currentSize + requiredSpace > maxBytes && !leastRecentlyUsed.isEmpty()) {
-      try {
-        cache.removeSpan(leastRecentlyUsed.first());
-      } catch (CacheException e) {
-        // do nothing.
-      }
-    }
-  }
-
 }

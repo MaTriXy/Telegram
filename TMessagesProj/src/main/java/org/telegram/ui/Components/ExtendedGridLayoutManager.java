@@ -14,8 +14,12 @@ import android.util.SparseIntArray;
 import org.telegram.messenger.AndroidUtilities;
 
 import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 public class ExtendedGridLayoutManager extends GridLayoutManager {
+
+    private final boolean firstRowFullWidth;
+    private final boolean lastRowFullWidth;
 
     private SparseIntArray itemSpans = new SparseIntArray();
     private SparseIntArray itemsToRow = new SparseIntArray();
@@ -24,7 +28,17 @@ public class ExtendedGridLayoutManager extends GridLayoutManager {
     private int calculatedWidth;
 
     public ExtendedGridLayoutManager(Context context, int spanCount) {
+        this(context, spanCount, false);
+    }
+
+    public ExtendedGridLayoutManager(Context context, int spanCount, boolean lastRowFullWidth) {
+        this(context, spanCount, lastRowFullWidth, false);
+    }
+
+    public ExtendedGridLayoutManager(Context context, int spanCount, boolean lastRowFullWidth, boolean firstRowFullWidth) {
         super(context, spanCount);
+        this.lastRowFullWidth = lastRowFullWidth;
+        this.firstRowFullWidth = firstRowFullWidth;
     }
 
     @Override
@@ -40,19 +54,48 @@ public class ExtendedGridLayoutManager extends GridLayoutManager {
         itemsToRow.clear();
         rowsCount = 0;
         firstRowMax = 0;
-        
-        int preferredRowSize = AndroidUtilities.dp(100);
-        int itemsCount = getFlowItemCount();
-        int spanCount = getSpanCount();
+
+        final int itemsCount = getFlowItemCount();
+        if (itemsCount == 0) {
+            return;
+        }
+
+        final int preferredRowSize = AndroidUtilities.dp(100);
+        final int spanCount = getSpanCount();
+
         int spanLeft = spanCount;
         int currentItemsInRow = 0;
         int currentItemsSpanAmount = 0;
-        for (int a = 0; a < itemsCount; a++) {
-            Size size = sizeForItem(a);
-            int requiredSpan = Math.min(spanCount, (int) Math.floor(spanCount * (size.width / size.height * preferredRowSize / viewPortAvailableSize)));
-            boolean moveToNewRow = spanLeft < requiredSpan || requiredSpan > 33 && spanLeft < requiredSpan - 15;
+        for (int a = 0, N = itemsCount + (lastRowFullWidth ? 1 : 0); a < N; a++) {
+            if (a == 0 && firstRowFullWidth) {
+                itemSpans.put(a, itemSpans.get(a) + spanCount);
+                itemsToRow.put(0, rowsCount);
+                rowsCount++;
+                currentItemsSpanAmount = 0;
+                currentItemsInRow = 0;
+                spanLeft = spanCount;
+                continue;
+            }
+            Size size = a < itemsCount ? sizeForItem(a) : null;
+            int requiredSpan;
+            boolean moveToNewRow;
+            if (size == null) {
+                moveToNewRow = currentItemsInRow != 0;
+                requiredSpan = spanCount;
+            } else {
+                requiredSpan = Math.min(spanCount, (int) Math.floor(spanCount * (size.width / size.height * preferredRowSize / viewPortAvailableSize)));
+                moveToNewRow = spanLeft < requiredSpan || requiredSpan > 33 && spanLeft < requiredSpan - 15;
+                if (size.full) {
+                    itemSpans.put(a, spanLeft);
+                    rowsCount++;
+                    currentItemsSpanAmount = 0;
+                    currentItemsInRow = 0;
+                    spanLeft = spanCount;
+                    continue;
+                }
+            }
             if (moveToNewRow) {
-                if (spanLeft != 0) {
+                if (spanLeft != 0 && currentItemsInRow != 0) {
                     int spanPerItem = spanLeft / currentItemsInRow;
                     for (int start = a - currentItemsInRow, b = start; b < start + currentItemsInRow; b++) {
                         if (b == start + currentItemsInRow - 1) {
@@ -63,6 +106,9 @@ public class ExtendedGridLayoutManager extends GridLayoutManager {
                         spanLeft -= spanPerItem;
                     }
                     itemsToRow.put(a - 1, rowsCount);
+                }
+                if (a == itemsCount) {
+                    break;
                 }
                 rowsCount++;
                 currentItemsSpanAmount = 0;
@@ -76,7 +122,7 @@ public class ExtendedGridLayoutManager extends GridLayoutManager {
             if (rowsCount == 0) {
                 firstRowMax = Math.max(firstRowMax, a);
             }
-            if (a == itemsCount - 1) {
+            if (a == itemsCount - 1 && !lastRowFullWidth) {
                 itemsToRow.put(a, rowsCount);
             }
             currentItemsSpanAmount += requiredSpan;
@@ -85,13 +131,17 @@ public class ExtendedGridLayoutManager extends GridLayoutManager {
 
             itemSpans.put(a, requiredSpan);
         }
-        if (itemsCount != 0) {
-            rowsCount++;
-        }
+        rowsCount++;
     }
 
     private Size sizeForItem(int i) {
-        Size size = getSizeForItem(i);
+        return fixSize(getSizeForItem(i));
+    }
+
+    protected Size fixSize(Size size) {
+        if (size == null) {
+            return null;
+        }
         if (size.width == 0) {
             size.width = 100;
         }
@@ -140,5 +190,15 @@ public class ExtendedGridLayoutManager extends GridLayoutManager {
 
     protected int getFlowItemCount() {
         return getItemCount();
+    }
+
+    @Override
+    public int getRowCountForAccessibility(RecyclerView.Recycler recycler, RecyclerView.State state) {
+        return state.getItemCount();
+    }
+
+    @Override
+    public int getColumnCountForAccessibility(RecyclerView.Recycler recycler, RecyclerView.State state) {
+        return 1;
     }
 }

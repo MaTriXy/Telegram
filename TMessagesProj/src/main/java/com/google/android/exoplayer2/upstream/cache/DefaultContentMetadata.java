@@ -16,18 +16,15 @@
 package com.google.android.exoplayer2.upstream.cache;
 
 import androidx.annotation.Nullable;
-import com.google.android.exoplayer2.C;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import com.google.common.base.Charsets;
 import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
 /** Default implementation of {@link ContentMetadata}. Values are stored as byte arrays. */
 public final class DefaultContentMetadata implements ContentMetadata {
@@ -36,31 +33,7 @@ public final class DefaultContentMetadata implements ContentMetadata {
   public static final DefaultContentMetadata EMPTY =
       new DefaultContentMetadata(Collections.emptyMap());
 
-  private static final int MAX_VALUE_LENGTH = 10 * 1024 * 1024;
   private int hashCode;
-
-  /**
-   * Deserializes a {@link DefaultContentMetadata} from the given input stream.
-   *
-   * @param input Input stream to read from.
-   * @return a {@link DefaultContentMetadata} instance.
-   * @throws IOException If an error occurs during reading from input.
-   */
-  public static DefaultContentMetadata readFromStream(DataInputStream input) throws IOException {
-    int size = input.readInt();
-    HashMap<String, byte[]> metadata = new HashMap<>();
-    for (int i = 0; i < size; i++) {
-      String name = input.readUTF();
-      int valueSize = input.readInt();
-      if (valueSize < 0 || valueSize > MAX_VALUE_LENGTH) {
-        throw new IOException("Invalid value size: " + valueSize);
-      }
-      byte[] value = new byte[valueSize];
-      input.readFully(value);
-      metadata.put(name, value);
-    }
-    return new DefaultContentMetadata(metadata);
-  }
 
   private final Map<String, byte[]> metadata;
 
@@ -68,7 +41,10 @@ public final class DefaultContentMetadata implements ContentMetadata {
     this(Collections.emptyMap());
   }
 
-  private DefaultContentMetadata(Map<String, byte[]> metadata) {
+  /**
+   * @param metadata The metadata entries in their raw byte array form.
+   */
+  public DefaultContentMetadata(Map<String, byte[]> metadata) {
     this.metadata = Collections.unmodifiableMap(metadata);
   }
 
@@ -84,27 +60,16 @@ public final class DefaultContentMetadata implements ContentMetadata {
     return new DefaultContentMetadata(mutatedMetadata);
   }
 
-  /**
-   * Serializes itself to a {@link DataOutputStream}.
-   *
-   * @param output Output stream to store the values.
-   * @throws IOException If an error occurs during writing values to output.
-   */
-  public void writeToStream(DataOutputStream output) throws IOException {
-    output.writeInt(metadata.size());
-    for (Entry<String, byte[]> entry : metadata.entrySet()) {
-      output.writeUTF(entry.getKey());
-      byte[] value = entry.getValue();
-      output.writeInt(value.length);
-      output.write(value);
-    }
+  /** Returns the set of metadata entries in their raw byte array form. */
+  public Set<Entry<String, byte[]>> entrySet() {
+    return metadata.entrySet();
   }
 
   @Override
   @Nullable
-  public final byte[] get(String name, @Nullable byte[] defaultValue) {
-    if (metadata.containsKey(name)) {
-      byte[] bytes = metadata.get(name);
+  public final byte[] get(String key, @Nullable byte[] defaultValue) {
+    @Nullable byte[] bytes = metadata.get(key);
+    if (bytes != null) {
       return Arrays.copyOf(bytes, bytes.length);
     } else {
       return defaultValue;
@@ -113,19 +78,19 @@ public final class DefaultContentMetadata implements ContentMetadata {
 
   @Override
   @Nullable
-  public final String get(String name, @Nullable String defaultValue) {
-    if (metadata.containsKey(name)) {
-      byte[] bytes = metadata.get(name);
-      return new String(bytes, Charset.forName(C.UTF8_NAME));
+  public final String get(String key, @Nullable String defaultValue) {
+    @Nullable byte[] bytes = metadata.get(key);
+    if (bytes != null) {
+      return new String(bytes, Charsets.UTF_8);
     } else {
       return defaultValue;
     }
   }
 
   @Override
-  public final long get(String name, long defaultValue) {
-    if (metadata.containsKey(name)) {
-      byte[] bytes = metadata.get(name);
+  public final long get(String key, long defaultValue) {
+    @Nullable byte[] bytes = metadata.get(key);
+    if (bytes != null) {
       return ByteBuffer.wrap(bytes).getLong();
     } else {
       return defaultValue;
@@ -133,8 +98,8 @@ public final class DefaultContentMetadata implements ContentMetadata {
   }
 
   @Override
-  public final boolean contains(String name) {
-    return metadata.containsKey(name);
+  public final boolean contains(String key) {
+    return metadata.containsKey(key);
   }
 
   @Override
@@ -166,7 +131,7 @@ public final class DefaultContentMetadata implements ContentMetadata {
     }
     for (Entry<String, byte[]> entry : first.entrySet()) {
       byte[] value = entry.getValue();
-      byte[] otherValue = second.get(entry.getKey());
+      @Nullable byte[] otherValue = second.get(entry.getKey());
       if (!Arrays.equals(value, otherValue)) {
         return false;
       }
@@ -189,19 +154,8 @@ public final class DefaultContentMetadata implements ContentMetadata {
   }
 
   private static void addValues(HashMap<String, byte[]> metadata, Map<String, Object> values) {
-    for (String name : values.keySet()) {
-      Object value = values.get(name);
-      byte[] bytes = getBytes(value);
-      if (bytes.length > MAX_VALUE_LENGTH) {
-        throw new IllegalArgumentException(
-            "The size of "
-                + name
-                + " ("
-                + bytes.length
-                + ") is greater than maximum allowed: "
-                + MAX_VALUE_LENGTH);
-      }
-      metadata.put(name, bytes);
+    for (Entry<String, Object> entry : values.entrySet()) {
+      metadata.put(entry.getKey(), getBytes(entry.getValue()));
     }
   }
 
@@ -209,12 +163,11 @@ public final class DefaultContentMetadata implements ContentMetadata {
     if (value instanceof Long) {
       return ByteBuffer.allocate(8).putLong((Long) value).array();
     } else if (value instanceof String) {
-      return ((String) value).getBytes(Charset.forName(C.UTF8_NAME));
+      return ((String) value).getBytes(Charsets.UTF_8);
     } else if (value instanceof byte[]) {
       return (byte[]) value;
     } else {
       throw new IllegalArgumentException();
     }
   }
-
 }

@@ -13,19 +13,20 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.graphics.Canvas;
-import android.graphics.Paint;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
-import android.text.TextPaint;
+import android.os.Build;
 import android.util.TypedValue;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import androidx.recyclerview.widget.DefaultItemAnimator;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.DownloadController;
@@ -47,13 +48,10 @@ import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.SlideChooseView;
 
 import java.util.ArrayList;
 import java.util.Collections;
-
-import androidx.recyclerview.widget.DefaultItemAnimator;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
 
 public class DataAutoDownloadActivity extends BaseFragment {
 
@@ -79,6 +77,7 @@ public class DataAutoDownloadActivity extends BaseFragment {
     private int photosRow;
     private int videosRow;
     private int filesRow;
+    private int storiesRow;
     private int typeSectionRow;
 
     private int rowCount;
@@ -93,196 +92,6 @@ public class DataAutoDownloadActivity extends BaseFragment {
 
     private String key;
     private String key2;
-
-    private class PresetChooseView extends View {
-
-        private Paint paint;
-        private TextPaint textPaint;
-
-        private int circleSize;
-        private int gapSize;
-        private int sideSide;
-        private int lineSize;
-
-        private boolean moving;
-        private boolean startMoving;
-        private float startX;
-
-        private int startMovingPreset;
-
-        private String low;
-        private int lowSize;
-        private String medium;
-        private int mediumSize;
-        private String high;
-        private int highSize;
-        private String custom;
-        private int customSize;
-
-        public PresetChooseView(Context context) {
-            super(context);
-
-            paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-            textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-            textPaint.setTextSize(AndroidUtilities.dp(13));
-
-            low = LocaleController.getString("AutoDownloadLow", R.string.AutoDownloadLow);
-            lowSize = (int) Math.ceil(textPaint.measureText(low));
-            medium = LocaleController.getString("AutoDownloadMedium", R.string.AutoDownloadMedium);
-            mediumSize = (int) Math.ceil(textPaint.measureText(medium));
-            high = LocaleController.getString("AutoDownloadHigh", R.string.AutoDownloadHigh);
-            highSize = (int) Math.ceil(textPaint.measureText(high));
-            custom = LocaleController.getString("AutoDownloadCustom", R.string.AutoDownloadCustom);
-            customSize = (int) Math.ceil(textPaint.measureText(custom));
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-            float x = event.getX();
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                getParent().requestDisallowInterceptTouchEvent(true);
-                for (int a = 0; a < presets.size(); a++) {
-                    int cx = sideSide + (lineSize + gapSize * 2 + circleSize) * a + circleSize / 2;
-                    if (x > cx - AndroidUtilities.dp(15) && x < cx + AndroidUtilities.dp(15)) {
-                        startMoving = a == selectedPreset;
-                        startX = x;
-                        startMovingPreset = selectedPreset;
-                        break;
-                    }
-                }
-            } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
-                if (startMoving) {
-                    if (Math.abs(startX - x) >= AndroidUtilities.getPixelsInCM(0.5f, true)) {
-                        moving = true;
-                        startMoving = false;
-                    }
-                } else if (moving) {
-                    for (int a = 0; a < presets.size(); a++) {
-                        int cx = sideSide + (lineSize + gapSize * 2 + circleSize) * a + circleSize / 2;
-                        int diff = lineSize / 2 + circleSize / 2 + gapSize;
-                        if (x > cx - diff && x < cx + diff) {
-                            if (selectedPreset != a) {
-                                setPreset(a);
-                            }
-                            break;
-                        }
-                    }
-                }
-            } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
-                if (!moving) {
-                    for (int a = 0; a < 5; a++) {
-                        int cx = sideSide + (lineSize + gapSize * 2 + circleSize) * a + circleSize / 2;
-                        if (x > cx - AndroidUtilities.dp(15) && x < cx + AndroidUtilities.dp(15)) {
-                            if (selectedPreset != a) {
-                                setPreset(a);
-                            }
-                            break;
-                        }
-                    }
-                } else {
-                    if (selectedPreset != startMovingPreset) {
-                        setPreset(selectedPreset);
-                    }
-                }
-                startMoving = false;
-                moving = false;
-            }
-            return true;
-        }
-
-        private void setPreset(int index) {
-            selectedPreset = index;
-            DownloadController.Preset preset = presets.get(selectedPreset);
-            if (preset == lowPreset) {
-                currentPresetNum = 0;
-            } else if (preset == mediumPreset) {
-                currentPresetNum = 1;
-            } else if (preset == highPreset) {
-                currentPresetNum = 2;
-            } else {
-                currentPresetNum = 3;
-            }
-            if (currentType == 0) {
-                DownloadController.getInstance(currentAccount).currentMobilePreset = currentPresetNum;
-            } else if (currentType == 1) {
-                DownloadController.getInstance(currentAccount).currentWifiPreset = currentPresetNum;
-            } else {
-                DownloadController.getInstance(currentAccount).currentRoamingPreset = currentPresetNum;
-            }
-            SharedPreferences.Editor editor = MessagesController.getMainSettings(currentAccount).edit();
-            editor.putInt(key2, currentPresetNum);
-            editor.commit();
-            DownloadController.getInstance(currentAccount).checkAutodownloadSettings();
-            for (int a = 0; a < 3; a++) {
-                RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(photosRow + a);
-                if (holder != null) {
-                    listAdapter.onBindViewHolder(holder, photosRow + a);
-                }
-            }
-            wereAnyChanges = true;
-            invalidate();
-        }
-
-        @Override
-        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(74), MeasureSpec.EXACTLY));
-            int width = MeasureSpec.getSize(widthMeasureSpec);
-            circleSize = AndroidUtilities.dp(6);
-            gapSize = AndroidUtilities.dp(2);
-            sideSide = AndroidUtilities.dp(22);
-            lineSize = (getMeasuredWidth() - circleSize * presets.size() - gapSize * 2 * (presets.size() - 1)  - sideSide * 2) / (presets.size() - 1);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            textPaint.setColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-            int cy = getMeasuredHeight() / 2 + AndroidUtilities.dp(11);
-
-            for (int a = 0; a < presets.size(); a++) {
-                int cx = sideSide + (lineSize + gapSize * 2 + circleSize) * a + circleSize / 2;
-                if (a <= selectedPreset) {
-                    paint.setColor(Theme.getColor(Theme.key_switchTrackChecked));
-                } else {
-                    paint.setColor(Theme.getColor(Theme.key_switchTrack));
-                }
-                canvas.drawCircle(cx, cy, a == selectedPreset ? AndroidUtilities.dp(6) : circleSize / 2, paint);
-                if (a != 0) {
-                    int x = cx - circleSize / 2 - gapSize - lineSize;
-                    int width = lineSize;
-                    if (a == selectedPreset || a == selectedPreset + 1) {
-                        width -= AndroidUtilities.dp(3);
-                    }
-                    if (a == selectedPreset + 1) {
-                        x += AndroidUtilities.dp(3);
-                    }
-                    canvas.drawRect(x, cy - AndroidUtilities.dp(1), x + width, cy + AndroidUtilities.dp(1), paint);
-                }
-                DownloadController.Preset preset = presets.get(a);
-                int size;
-                String text;
-                if (preset == lowPreset) {
-                    text = low;
-                    size = lowSize;
-                } else if (preset == mediumPreset) {
-                    text = medium;
-                    size = mediumSize;
-                } else if (preset == highPreset) {
-                    text = high;
-                    size = highSize;
-                } else {
-                    text = custom;
-                    size = customSize;
-                }
-                if (a == 0) {
-                    canvas.drawText(text, AndroidUtilities.dp(22), AndroidUtilities.dp(28), textPaint);
-                } else if (a == presets.size() - 1) {
-                    canvas.drawText(text, getMeasuredWidth() - size - AndroidUtilities.dp(22), AndroidUtilities.dp(28), textPaint);
-                } else {
-                    canvas.drawText(text, cx - size / 2, AndroidUtilities.dp(28), textPaint);
-                }
-            }
-        }
-    }
 
     public DataAutoDownloadActivity(int type) {
         super();
@@ -325,11 +134,11 @@ public class DataAutoDownloadActivity extends BaseFragment {
     public View createView(Context context) {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         if (currentType == 0) {
-            actionBar.setTitle(LocaleController.getString("AutoDownloadOnMobileData", R.string.AutoDownloadOnMobileData));
+            actionBar.setTitle(LocaleController.getString(R.string.AutoDownloadOnMobileData));
         } else if (currentType == 1) {
-            actionBar.setTitle(LocaleController.getString("AutoDownloadOnWiFiData", R.string.AutoDownloadOnWiFiData));
+            actionBar.setTitle(LocaleController.getString(R.string.AutoDownloadOnWiFiData));
         } else if (currentType == 2) {
-            actionBar.setTitle(LocaleController.getString("AutoDownloadOnRoamingData", R.string.AutoDownloadOnRoamingData));
+            actionBar.setTitle(LocaleController.getString(R.string.AutoDownloadOnRoamingData));
         }
         if (AndroidUtilities.isTablet()) {
             actionBar.setOccupyStatusBar(false);
@@ -380,9 +189,9 @@ public class DataAutoDownloadActivity extends BaseFragment {
                 cell.setBackgroundColorAnimated(!checked, Theme.getColor(typePreset.enabled ? Theme.key_windowBackgroundChecked : Theme.key_windowBackgroundUnchecked));
                 updateRows();
                 if (typePreset.enabled) {
-                    listAdapter.notifyItemRangeInserted(autoDownloadSectionRow + 1, 8);
+                    listAdapter.notifyItemRangeInserted(autoDownloadSectionRow + 1, 9);
                 } else {
-                    listAdapter.notifyItemRangeRemoved(autoDownloadSectionRow + 1, 8);
+                    listAdapter.notifyItemRangeRemoved(autoDownloadSectionRow + 1, 9);
                 }
                 listAdapter.notifyItemChanged(autoDownloadSectionRow);
                 SharedPreferences.Editor editor = MessagesController.getMainSettings(currentAccount).edit();
@@ -400,7 +209,7 @@ public class DataAutoDownloadActivity extends BaseFragment {
                 cell.setChecked(!checked);
                 DownloadController.getInstance(currentAccount).checkAutodownloadSettings();
                 wereAnyChanges = true;
-            } else if (position == photosRow || position == videosRow || position == filesRow) {
+            } else if (position == photosRow || position == videosRow || position == filesRow || position == storiesRow) {
                 if (!view.isEnabled()) {
                     return;
                 }
@@ -409,6 +218,8 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     type = DownloadController.AUTODOWNLOAD_TYPE_PHOTO;
                 } else if (position == videosRow) {
                     type = DownloadController.AUTODOWNLOAD_TYPE_VIDEO;
+                } else if (position == storiesRow) {
+                    type = -1;
                 } else {
                     type = DownloadController.AUTODOWNLOAD_TYPE_DOCUMENT;
                 }
@@ -434,8 +245,7 @@ public class DataAutoDownloadActivity extends BaseFragment {
                 NotificationsCheckCell cell = (NotificationsCheckCell) view;
                 boolean checked = cell.isChecked();
 
-                if (LocaleController.isRTL && x <= AndroidUtilities.dp(76) || !LocaleController.isRTL && x >= view.getMeasuredWidth() - AndroidUtilities.dp(76)) {
-
+                if (position == storiesRow || (LocaleController.isRTL && x <= AndroidUtilities.dp(76) || !LocaleController.isRTL && x >= view.getMeasuredWidth() - AndroidUtilities.dp(76))) {
                     if (currentPresetNum != 3) {
                         if (currentPresetNum == 0) {
                             typePreset.set(lowPreset);
@@ -446,18 +256,22 @@ public class DataAutoDownloadActivity extends BaseFragment {
                         }
                     }
 
-                    boolean hasAny = false;
-                    for (int a = 0; a < typePreset.mask.length; a++) {
-                        if ((currentPreset.mask[a] & type) != 0) {
-                            hasAny = true;
-                            break;
+                    if (position == storiesRow) {
+                        typePreset.preloadStories = !checked;
+                    } else {
+                        boolean hasAny = false;
+                        for (int a = 0; a < typePreset.mask.length; a++) {
+                            if ((currentPreset.mask[a] & type) != 0) {
+                                hasAny = true;
+                                break;
+                            }
                         }
-                    }
-                    for (int a = 0; a < typePreset.mask.length; a++) {
-                        if (checked) {
-                            typePreset.mask[a] &=~ type;
-                        } else if (!hasAny) {
-                            typePreset.mask[a] |= type;
+                        for (int a = 0; a < typePreset.mask.length; a++) {
+                            if (checked) {
+                                typePreset.mask[a] &= ~type;
+                            } else if (!hasAny) {
+                                typePreset.mask[a] |= type;
+                            }
                         }
                     }
 
@@ -492,13 +306,13 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     linearLayout.setOrientation(LinearLayout.VERTICAL);
                     builder.setCustomView(linearLayout);
 
-                    HeaderCell headerCell = new HeaderCell(getParentActivity(), true, 21, 15, false);
+                    HeaderCell headerCell = new HeaderCell(getParentActivity(), Theme.key_dialogTextBlue2, 21, 15, false);
                     if (position == photosRow) {
-                        headerCell.setText(LocaleController.getString("AutoDownloadPhotosTitle", R.string.AutoDownloadPhotosTitle));
+                        headerCell.setText(LocaleController.getString(R.string.AutoDownloadPhotosTitle));
                     } else if (position == videosRow) {
-                        headerCell.setText(LocaleController.getString("AutoDownloadVideosTitle", R.string.AutoDownloadVideosTitle));
+                        headerCell.setText(LocaleController.getString(R.string.AutoDownloadVideosTitle));
                     } else {
-                        headerCell.setText(LocaleController.getString("AutoDownloadFilesTitle", R.string.AutoDownloadFilesTitle));
+                        headerCell.setText(LocaleController.getString(R.string.AutoDownloadFilesTitle));
                     }
                     linearLayout.addView(headerCell, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -508,15 +322,15 @@ public class DataAutoDownloadActivity extends BaseFragment {
 
                     TextCheckBoxCell[] cells = new TextCheckBoxCell[4];
                     for (int a = 0; a < 4; a++) {
-                        TextCheckBoxCell checkBoxCell = cells[a] = new TextCheckBoxCell(getParentActivity(), true);
+                        TextCheckBoxCell checkBoxCell = cells[a] = new TextCheckBoxCell(getParentActivity(), true, false);
                         if (a == 0) {
-                            cells[a].setTextAndCheck(LocaleController.getString("AutodownloadContacts", R.string.AutodownloadContacts), (currentPreset.mask[DownloadController.PRESET_NUM_CONTACT] & type) != 0, true);
+                            cells[a].setTextAndCheck(LocaleController.getString(R.string.AutodownloadContacts), (currentPreset.mask[DownloadController.PRESET_NUM_CONTACT] & type) != 0, true);
                         } else if (a == 1) {
-                            cells[a].setTextAndCheck(LocaleController.getString("AutodownloadPrivateChats", R.string.AutodownloadPrivateChats), (currentPreset.mask[DownloadController.PRESET_NUM_PM] & type) != 0, true);
+                            cells[a].setTextAndCheck(LocaleController.getString(R.string.AutodownloadPrivateChats), (currentPreset.mask[DownloadController.PRESET_NUM_PM] & type) != 0, true);
                         } else if (a == 2) {
-                            cells[a].setTextAndCheck(LocaleController.getString("AutodownloadGroupChats", R.string.AutodownloadGroupChats), (currentPreset.mask[DownloadController.PRESET_NUM_GROUP] & type) != 0, true);
-                        } else if (a == 3) {
-                            cells[a].setTextAndCheck(LocaleController.getString("AutodownloadChannels", R.string.AutodownloadChannels), (currentPreset.mask[DownloadController.PRESET_NUM_CHANNEL] & type) != 0, position != photosRow);
+                            cells[a].setTextAndCheck(LocaleController.getString(R.string.AutodownloadGroupChats), (currentPreset.mask[DownloadController.PRESET_NUM_GROUP] & type) != 0, true);
+                        } else {
+                            cells[a].setTextAndCheck(LocaleController.getString(R.string.AutodownloadChannels), (currentPreset.mask[DownloadController.PRESET_NUM_CHANNEL] & type) != 0, position != photosRow);
                         }
                         cells[a].setBackgroundDrawable(Theme.getSelectorDrawable(false));
                         cells[a].setOnClickListener(v -> {
@@ -599,20 +413,20 @@ public class DataAutoDownloadActivity extends BaseFragment {
                         linearLayout.addView(checkCell[0], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
                         checkCell[0].setOnClickListener(v -> checkCell[0].setChecked(!checkCell[0].isChecked()));
 
-                        Drawable drawable = Theme.getThemedDrawable(getParentActivity(), R.drawable.greydivider, Theme.key_windowBackgroundGrayShadow);
+                        Drawable drawable = Theme.getThemedDrawableByKey(getParentActivity(), R.drawable.greydivider, Theme.key_windowBackgroundGrayShadow);
                         CombinedDrawable combinedDrawable = new CombinedDrawable(new ColorDrawable(Theme.getColor(Theme.key_windowBackgroundGray)), drawable);
                         combinedDrawable.setFullsize(true);
                         infoCell.setBackgroundDrawable(combinedDrawable);
                         linearLayout.addView(infoCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
                         if (position == videosRow) {
-                            sizeCell[0].setText(LocaleController.getString("AutoDownloadMaxVideoSize", R.string.AutoDownloadMaxVideoSize));
-                            checkCell[0].setTextAndCheck(LocaleController.getString("AutoDownloadPreloadVideo", R.string.AutoDownloadPreloadVideo), currentPreset.preloadVideo, false);
+                            sizeCell[0].setText(LocaleController.getString(R.string.AutoDownloadMaxVideoSize));
+                            checkCell[0].setTextAndCheck(LocaleController.getString(R.string.AutoDownloadPreloadVideo), currentPreset.preloadVideo, false);
                             infoCell.setText(LocaleController.formatString("AutoDownloadPreloadVideoInfo", R.string.AutoDownloadPreloadVideoInfo, AndroidUtilities.formatFileSize(currentPreset.sizes[index])));
                         } else {
-                            sizeCell[0].setText(LocaleController.getString("AutoDownloadMaxFileSize", R.string.AutoDownloadMaxFileSize));
-                            checkCell[0].setTextAndCheck(LocaleController.getString("AutoDownloadPreloadMusic", R.string.AutoDownloadPreloadMusic), currentPreset.preloadMusic, false);
-                            infoCell.setText(LocaleController.getString("AutoDownloadPreloadMusicInfo", R.string.AutoDownloadPreloadMusicInfo));
+                            sizeCell[0].setText(LocaleController.getString(R.string.AutoDownloadMaxFileSize));
+                            checkCell[0].setTextAndCheck(LocaleController.getString(R.string.AutoDownloadPreloadMusic), currentPreset.preloadMusic, false);
+                            infoCell.setText(LocaleController.getString(R.string.AutoDownloadPreloadMusicInfo));
                         }
                     } else {
                         sizeCell[0] = null;
@@ -631,8 +445,8 @@ public class DataAutoDownloadActivity extends BaseFragment {
                             }
                         }
                         if (!hasAny) {
-                            sizeCell[0].setEnabled(hasAny, null);
-                            checkCell[0].setEnabled(hasAny, null);
+                            sizeCell[0].setEnabled(false, null);
+                            checkCell[0].setEnabled(false, null);
                         }
                         if (currentPreset.sizes[index] <= 2 * 1024 * 1024) {
                             checkCell[0].setEnabled(false, null);
@@ -647,8 +461,8 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
                     textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlue2));
                     textView.setGravity(Gravity.CENTER);
-                    textView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
-                    textView.setText(LocaleController.getString("Cancel", R.string.Cancel).toUpperCase());
+                    textView.setTypeface(AndroidUtilities.bold());
+                    textView.setText(LocaleController.getString(R.string.Cancel).toUpperCase());
                     textView.setPadding(AndroidUtilities.dp(10), 0, AndroidUtilities.dp(10), 0);
                     buttonsLayout.addView(textView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 36, Gravity.TOP | Gravity.LEFT));
                     textView.setOnClickListener(v14 -> builder.getDismissRunnable().run());
@@ -657,8 +471,8 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
                     textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlue2));
                     textView.setGravity(Gravity.CENTER);
-                    textView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
-                    textView.setText(LocaleController.getString("Save", R.string.Save).toUpperCase());
+                    textView.setTypeface(AndroidUtilities.bold());
+                    textView.setText(LocaleController.getString(R.string.Save).toUpperCase());
                     textView.setPadding(AndroidUtilities.dp(10), 0, AndroidUtilities.dp(10), 0);
                     buttonsLayout.addView(textView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 36, Gravity.TOP | Gravity.RIGHT));
                     textView.setOnClickListener(v1 -> {
@@ -774,8 +588,9 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     break;
                 }
             }
-            int size1 = (video1 ? o1.sizes[index1] : 0) + (doc1 ? o1.sizes[index2] : 0);
-            int size2 = (video2 ? o2.sizes[index1] : 0) + (doc2 ? o2.sizes[index2] : 0);
+            long size1 = (video1 ? o1.sizes[index1] : 0) + (doc1 ? o1.sizes[index2] : 0) + (o1.preloadStories ? 1 : 0);
+            long size2 = (video2 ? o2.sizes[index1] : 0) + (doc2 ? o2.sizes[index2] : 0) + (o2.preloadStories ? 1 : 0);
+
             if (size1 > size2) {
                 return 1;
             } else if (size1 < size2) {
@@ -783,14 +598,6 @@ public class DataAutoDownloadActivity extends BaseFragment {
             }
             return 0;
         });
-        if (listView != null) {
-            RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(usageProgressRow);
-            if (holder != null) {
-                holder.itemView.requestLayout();
-            } else {
-                listAdapter.notifyItemChanged(usageProgressRow);
-            }
-        }
         if (currentPresetNum == 0 || currentPresetNum == 3 && typePreset.equals(lowPreset)) {
             selectedPreset = presets.indexOf(lowPreset);
         } else if (currentPresetNum == 1 || currentPresetNum == 3 && typePreset.equals(mediumPreset)) {
@@ -799,6 +606,14 @@ public class DataAutoDownloadActivity extends BaseFragment {
             selectedPreset = presets.indexOf(highPreset);
         } else {
             selectedPreset = presets.indexOf(typePreset);
+        }
+        if (listView != null) {
+            RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(usageProgressRow);
+            if (holder != null && holder.itemView instanceof SlideChooseView) {
+                updatePresetChoseView((SlideChooseView) holder.itemView);
+            } else {
+                listAdapter.notifyItemChanged(usageProgressRow);
+            }
         }
     }
 
@@ -814,6 +629,7 @@ public class DataAutoDownloadActivity extends BaseFragment {
             photosRow = rowCount++;
             videosRow = rowCount++;
             filesRow = rowCount++;
+            storiesRow = rowCount++;
             typeSectionRow = rowCount++;
         } else {
             usageHeaderRow = -1;
@@ -823,6 +639,7 @@ public class DataAutoDownloadActivity extends BaseFragment {
             photosRow = -1;
             videosRow = -1;
             filesRow = -1;
+            storiesRow = -1;
             typeSectionRow = -1;
         }
     }
@@ -847,7 +664,7 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     TextCheckCell view = (TextCheckCell) holder.itemView;
                     if (position == autoDownloadRow) {
                         view.setDrawCheckRipple(true);
-                        view.setTextAndCheck(LocaleController.getString("AutoDownloadMedia", R.string.AutoDownloadMedia), typePreset.enabled, false);
+                        view.setTextAndCheck(LocaleController.getString(R.string.AutoDownloadMedia), typePreset.enabled, false);
                         view.setTag(typePreset.enabled ? Theme.key_windowBackgroundChecked : Theme.key_windowBackgroundUnchecked);
                         view.setBackgroundColor(Theme.getColor(typePreset.enabled ? Theme.key_windowBackgroundChecked : Theme.key_windowBackgroundUnchecked));
                     }
@@ -856,10 +673,15 @@ public class DataAutoDownloadActivity extends BaseFragment {
                 case 2: {
                     HeaderCell view = (HeaderCell) holder.itemView;
                     if (position == usageHeaderRow) {
-                        view.setText(LocaleController.getString("AutoDownloadDataUsage", R.string.AutoDownloadDataUsage));
+                        view.setText(LocaleController.getString(R.string.AutoDownloadDataUsage));
                     } else if (position == typeHeaderRow) {
-                        view.setText(LocaleController.getString("AutoDownloadTypes", R.string.AutoDownloadTypes));
+                        view.setText(LocaleController.getString(R.string.AutoDownloadTypes));
                     }
+                    break;
+                }
+                case 3: {
+                    SlideChooseView slideChooseView = (SlideChooseView) holder.itemView;
+                    updatePresetChoseView(slideChooseView);
                     break;
                 }
                 case 4: {
@@ -867,14 +689,19 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     DownloadController.Preset preset;
                     String text;
                     int type;
+                    view.setDrawLine(true);
                     if (position == photosRow) {
-                        text = LocaleController.getString("AutoDownloadPhotos", R.string.AutoDownloadPhotos);
+                        text = LocaleController.getString(R.string.AutoDownloadPhotos);
                         type = DownloadController.AUTODOWNLOAD_TYPE_PHOTO;
                     } else if (position == videosRow) {
-                        text = LocaleController.getString("AutoDownloadVideos", R.string.AutoDownloadVideos);
+                        text = LocaleController.getString(R.string.AutoDownloadVideos);
                         type = DownloadController.AUTODOWNLOAD_TYPE_VIDEO;
+                    } else if (position == storiesRow) {
+                        text = LocaleController.getString(R.string.AutoDownloadStories);
+                        type = -1;
+                        view.setDrawLine(false);
                     } else {
-                        text = LocaleController.getString("AutoDownloadFiles", R.string.AutoDownloadFiles);
+                        text = LocaleController.getString(R.string.AutoDownloadFiles);
                         type = DownloadController.AUTODOWNLOAD_TYPE_DOCUMENT;
                     }
                     if (currentType == 0) {
@@ -884,74 +711,91 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     } else {
                         preset = DownloadController.getInstance(currentAccount).getCurrentRoamingPreset();
                     }
-                    int maxSize = preset.sizes[DownloadController.typeToIndex(type)];
+                    long maxSize = preset.sizes[DownloadController.typeToIndex(type)];
 
                     int count = 0;
                     StringBuilder builder = new StringBuilder();
-                    for (int a = 0; a < preset.mask.length; a++) {
-                        if ((preset.mask[a] & type) != 0) {
-                            if (builder.length() != 0) {
-                                builder.append(", ");
-                            }
-                            switch (a) {
-                                case 0:
-                                    builder.append(LocaleController.getString("AutoDownloadContacts", R.string.AutoDownloadContacts));
-                                    break;
-                                case 1:
-                                    builder.append(LocaleController.getString("AutoDownloadPm", R.string.AutoDownloadPm));
-                                    break;
-                                case 2:
-                                    builder.append(LocaleController.getString("AutoDownloadGroups", R.string.AutoDownloadGroups));
-                                    break;
-                                case 3:
-                                    builder.append(LocaleController.getString("AutoDownloadChannels", R.string.AutoDownloadChannels));
-                                    break;
-                            }
-                            count++;
-                        }
-                    }
-                    if (count == 4) {
-                        builder.setLength(0);
-                        if (position == photosRow) {
-                            builder.append(LocaleController.getString("AutoDownloadOnAllChats", R.string.AutoDownloadOnAllChats));
+                    if (position == storiesRow) {
+                        if (preset.preloadStories) {
+                            builder = new StringBuilder(LocaleController.formatString("AutoDownloadOn", R.string.AutoDownloadOn, builder.toString()));
+                            count = 1;
                         } else {
-                            builder.append(LocaleController.formatString("AutoDownloadUpToOnAllChats", R.string.AutoDownloadUpToOnAllChats, AndroidUtilities.formatFileSize(maxSize)));
+                            builder = new StringBuilder(LocaleController.formatString("AutoDownloadOff", R.string.AutoDownloadOff, builder.toString()));
+                            count = 0;
                         }
-                    } else if (count == 0) {
-                        builder.append(LocaleController.getString("AutoDownloadOff", R.string.AutoDownloadOff));
                     } else {
-                        if (position == photosRow) {
-                            builder = new StringBuilder(LocaleController.formatString("AutoDownloadOnFor", R.string.AutoDownloadOnFor, builder.toString()));
+                        for (int a = 0; a < preset.mask.length; a++) {
+                            if ((preset.mask[a] & type) != 0) {
+                                if (builder.length() != 0) {
+                                    builder.append(", ");
+                                }
+                                switch (a) {
+                                    case 0:
+                                        builder.append(LocaleController.getString(R.string.AutoDownloadContacts));
+                                        break;
+                                    case 1:
+                                        builder.append(LocaleController.getString(R.string.AutoDownloadPm));
+                                        break;
+                                    case 2:
+                                        builder.append(LocaleController.getString(R.string.AutoDownloadGroups));
+                                        break;
+                                    case 3:
+                                        builder.append(LocaleController.getString(R.string.AutoDownloadChannels));
+                                        break;
+                                }
+                                count++;
+                            }
+                        }
+                        if (count == 4) {
+                            builder.setLength(0);
+                            if (position == photosRow) {
+                                builder.append(LocaleController.getString(R.string.AutoDownloadOnAllChats));
+                            } else {
+                                builder.append(LocaleController.formatString("AutoDownloadUpToOnAllChats", R.string.AutoDownloadUpToOnAllChats, AndroidUtilities.formatFileSize(maxSize)));
+                            }
+                        } else if (count == 0) {
+                            builder.append(LocaleController.getString(R.string.AutoDownloadOff));
                         } else {
-                            builder = new StringBuilder(LocaleController.formatString("AutoDownloadOnUpToFor", R.string.AutoDownloadOnUpToFor, AndroidUtilities.formatFileSize(maxSize), builder.toString()));
+                            if (position == photosRow) {
+                                builder = new StringBuilder(LocaleController.formatString("AutoDownloadOnFor", R.string.AutoDownloadOnFor, builder.toString()));
+                            } else {
+                                builder = new StringBuilder(LocaleController.formatString("AutoDownloadOnUpToFor", R.string.AutoDownloadOnUpToFor, AndroidUtilities.formatFileSize(maxSize), builder.toString()));
+                            }
                         }
                     }
                     if (animateChecked) {
                         view.setChecked(count != 0);
                     }
-                    view.setTextAndValueAndCheck(text, builder, count != 0, 0, true, position != filesRow);
+                    view.setTextAndValueAndCheck(text, builder, count != 0, 0, true, position != storiesRow);
                     break;
                 }
                 case 5: {
                     TextInfoPrivacyCell view = (TextInfoPrivacyCell) holder.itemView;
                     if (position == typeSectionRow) {
-                        view.setText(LocaleController.getString("AutoDownloadAudioInfo", R.string.AutoDownloadAudioInfo));
-                        view.setBackgroundDrawable(Theme.getThemedDrawable(mContext, R.drawable.greydivider, Theme.key_windowBackgroundGrayShadow));
+                        view.setText(LocaleController.getString(R.string.AutoDownloadAudioInfo));
+                        view.setBackgroundDrawable(Theme.getThemedDrawableByKey(mContext, R.drawable.greydivider, Theme.key_windowBackgroundGrayShadow));
                         view.setFixedSize(0);
+                        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
                     } else if (position == autoDownloadSectionRow) {
                         if (usageHeaderRow == -1) {
-                            view.setBackgroundDrawable(Theme.getThemedDrawable(mContext, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                            view.setBackgroundDrawable(Theme.getThemedDrawableByKey(mContext, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
                             if (currentType == 0) {
-                                view.setText(LocaleController.getString("AutoDownloadOnMobileDataInfo", R.string.AutoDownloadOnMobileDataInfo));
+                                view.setText(LocaleController.getString(R.string.AutoDownloadOnMobileDataInfo));
                             } else if (currentType == 1) {
-                                view.setText(LocaleController.getString("AutoDownloadOnWiFiDataInfo", R.string.AutoDownloadOnWiFiDataInfo));
+                                view.setText(LocaleController.getString(R.string.AutoDownloadOnWiFiDataInfo));
                             } else if (currentType == 2) {
-                                view.setText(LocaleController.getString("AutoDownloadOnRoamingDataInfo", R.string.AutoDownloadOnRoamingDataInfo));
+                                view.setText(LocaleController.getString(R.string.AutoDownloadOnRoamingDataInfo));
                             }
+                            view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
                         } else {
-                            view.setBackgroundDrawable(Theme.getThemedDrawable(mContext, R.drawable.greydivider, Theme.key_windowBackgroundGrayShadow));
+                            view.setBackgroundDrawable(Theme.getThemedDrawableByKey(mContext, R.drawable.greydivider, Theme.key_windowBackgroundGrayShadow));
                             view.setText(null);
                             view.setFixedSize(12);
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                                view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+                            } else {
+                                view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                            }
                         }
                         break;
                     }
@@ -962,17 +806,17 @@ public class DataAutoDownloadActivity extends BaseFragment {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == photosRow || position == videosRow || position == filesRow;
+            return position == photosRow || position == videosRow || position == filesRow || position == storiesRow;
         }
 
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            View view = null;
+            View view;
             switch (viewType) {
                 case 0: {
                     TextCheckCell cell = new TextCheckCell(mContext);
                     cell.setColors(Theme.key_windowBackgroundCheckText, Theme.key_switchTrackBlue, Theme.key_switchTrackBlueChecked, Theme.key_switchTrackBlueThumb, Theme.key_switchTrackBlueThumbChecked);
-                    cell.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+                    cell.setTypeface(AndroidUtilities.bold());
                     cell.setHeight(56);
                     view = cell;
                     break;
@@ -987,7 +831,38 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     break;
                 }
                 case 3: {
-                    view = new PresetChooseView(mContext);
+                    SlideChooseView slideChooseView = new SlideChooseView(mContext);
+                    view = slideChooseView;
+                    slideChooseView.setCallback(index -> {
+                        DownloadController.Preset preset = presets.get(index);
+                        if (preset == lowPreset) {
+                            currentPresetNum = 0;
+                        } else if (preset == mediumPreset) {
+                            currentPresetNum = 1;
+                        } else if (preset == highPreset) {
+                            currentPresetNum = 2;
+                        } else {
+                            currentPresetNum = 3;
+                        }
+                        if (currentType == 0) {
+                            DownloadController.getInstance(currentAccount).currentMobilePreset = currentPresetNum;
+                        } else if (currentType == 1) {
+                            DownloadController.getInstance(currentAccount).currentWifiPreset = currentPresetNum;
+                        } else {
+                            DownloadController.getInstance(currentAccount).currentRoamingPreset = currentPresetNum;
+                        }
+                        SharedPreferences.Editor editor = MessagesController.getMainSettings(currentAccount).edit();
+                        editor.putInt(key2, currentPresetNum);
+                        editor.commit();
+                        DownloadController.getInstance(currentAccount).checkAutodownloadSettings();
+                        for (int a = 0; a < 4; a++) {
+                            RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(photosRow + a);
+                            if (holder != null) {
+                                listAdapter.onBindViewHolder(holder, photosRow + a);
+                            }
+                        }
+                        wereAnyChanges = true;
+                    });
                     view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     break;
                 }
@@ -996,9 +871,10 @@ public class DataAutoDownloadActivity extends BaseFragment {
                     view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     break;
                 }
-                case 5: {
+                case 5:
+                default: {
                     view = new TextInfoPrivacyCell(mContext);
-                    view.setBackgroundDrawable(Theme.getThemedDrawable(mContext, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                    view.setBackgroundDrawable(Theme.getThemedDrawableByKey(mContext, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
                 }
             }
             view.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT));
@@ -1015,7 +891,7 @@ public class DataAutoDownloadActivity extends BaseFragment {
                 return 2;
             } else if (position == usageProgressRow) {
                 return 3;
-            } else if (position == photosRow || position == videosRow || position == filesRow) {
+            } else if (position == photosRow || position == videosRow || position == filesRow || position == storiesRow) {
                 return 4;
             } else {
                 return 5;
@@ -1023,47 +899,66 @@ public class DataAutoDownloadActivity extends BaseFragment {
         }
     }
 
+    private void updatePresetChoseView(SlideChooseView slideChooseView) {
+        String[] presetsStr = new String[presets.size()];
+        for (int i = 0; i < presets.size(); i++) {
+            DownloadController.Preset preset = presets.get(i);
+            if (preset == lowPreset) {
+                presetsStr[i] = LocaleController.getString(R.string.AutoDownloadLow);
+            } else if (preset == mediumPreset) {
+                presetsStr[i] = LocaleController.getString(R.string.AutoDownloadMedium);
+            } else if (preset == highPreset) {
+                presetsStr[i] = LocaleController.getString(R.string.AutoDownloadHigh);
+            } else {
+                presetsStr[i] = LocaleController.getString(R.string.AutoDownloadCustom);
+            }
+        }
+        slideChooseView.setOptions(selectedPreset, presetsStr);
+    }
+
     @Override
-    public ThemeDescription[] getThemeDescriptions() {
-        return new ThemeDescription[]{
-                new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR, new Class[]{HeaderCell.class, NotificationsCheckCell.class, PresetChooseView.class}, null, null, null, Theme.key_windowBackgroundWhite),
-                new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundGray),
+    public ArrayList<ThemeDescription> getThemeDescriptions() {
+        ArrayList<ThemeDescription> themeDescriptions = new ArrayList<>();
 
-                new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault),
-                new ThemeDescription(listView, ThemeDescription.FLAG_LISTGLOWCOLOR, null, null, null, null, Theme.key_actionBarDefault),
-                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_actionBarDefaultIcon),
-                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_actionBarDefaultTitle),
-                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_actionBarDefaultSelector),
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR, new Class[]{HeaderCell.class, NotificationsCheckCell.class, SlideChooseView.class}, null, null, null, Theme.key_windowBackgroundWhite));
+        themeDescriptions.add(new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundGray));
 
-                new ThemeDescription(listView, ThemeDescription.FLAG_SELECTOR, null, null, null, null, Theme.key_listSelector),
+        themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_LISTGLOWCOLOR, null, null, null, null, Theme.key_actionBarDefault));
+        themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_actionBarDefaultIcon));
+        themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_actionBarDefaultTitle));
+        themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_actionBarDefaultSelector));
 
-                new ThemeDescription(listView, 0, new Class[]{View.class}, Theme.dividerPaint, null, null, Theme.key_divider),
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_SELECTOR, null, null, null, null, Theme.key_listSelector));
 
-                new ThemeDescription(listView, ThemeDescription.FLAG_BACKGROUNDFILTER, new Class[]{ShadowSectionCell.class}, null, null, null, Theme.key_windowBackgroundGrayShadow),
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{View.class}, Theme.dividerPaint, null, null, Theme.key_divider));
 
-                new ThemeDescription(listView, 0, new Class[]{HeaderCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlueHeader),
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_BACKGROUNDFILTER, new Class[]{ShadowSectionCell.class}, null, null, null, Theme.key_windowBackgroundGrayShadow));
 
-                new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR | ThemeDescription.FLAG_CHECKTAG, new Class[]{TextCheckCell.class}, null, null, null, Theme.key_windowBackgroundChecked),
-                new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR | ThemeDescription.FLAG_CHECKTAG, new Class[]{TextCheckCell.class}, null, null, null, Theme.key_windowBackgroundUnchecked),
-                new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundCheckText),
-                new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlue),
-                new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueChecked),
-                new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueThumb),
-                new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueThumbChecked),
-                new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueSelector),
-                new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueSelectorChecked),
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{HeaderCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlueHeader));
 
-                new ThemeDescription(listView, 0, new Class[]{NotificationsCheckCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
-                new ThemeDescription(listView, 0, new Class[]{NotificationsCheckCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText2),
-                new ThemeDescription(listView, 0, new Class[]{NotificationsCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrack),
-                new ThemeDescription(listView, 0, new Class[]{NotificationsCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackChecked),
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR | ThemeDescription.FLAG_CHECKTAG, new Class[]{TextCheckCell.class}, null, null, null, Theme.key_windowBackgroundChecked));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR | ThemeDescription.FLAG_CHECKTAG, new Class[]{TextCheckCell.class}, null, null, null, Theme.key_windowBackgroundUnchecked));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundCheckText));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlue));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueChecked));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueThumb));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueThumbChecked));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueSelector));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackBlueSelectorChecked));
 
-                new ThemeDescription(listView, ThemeDescription.FLAG_BACKGROUNDFILTER, new Class[]{TextInfoPrivacyCell.class}, null, null, null, Theme.key_windowBackgroundGrayShadow),
-                new ThemeDescription(listView, 0, new Class[]{TextInfoPrivacyCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText4),
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{NotificationsCheckCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{NotificationsCheckCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText2));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{NotificationsCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrack));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{NotificationsCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackChecked));
 
-                new ThemeDescription(listView, 0, new Class[]{PresetChooseView.class}, null, null, null, Theme.key_switchTrack),
-                new ThemeDescription(listView, 0, new Class[]{PresetChooseView.class}, null, null, null, Theme.key_switchTrackChecked),
-                new ThemeDescription(listView, 0, new Class[]{PresetChooseView.class}, null, null, null, Theme.key_windowBackgroundWhiteGrayText),
-        };
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_BACKGROUNDFILTER, new Class[]{TextInfoPrivacyCell.class}, null, null, null, Theme.key_windowBackgroundGrayShadow));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextInfoPrivacyCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText4));
+
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{SlideChooseView.class}, null, null, null, Theme.key_switchTrack));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{SlideChooseView.class}, null, null, null, Theme.key_switchTrackChecked));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{SlideChooseView.class}, null, null, null, Theme.key_windowBackgroundWhiteGrayText));
+
+        return themeDescriptions;
     }
 }

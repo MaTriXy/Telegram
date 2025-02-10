@@ -22,6 +22,10 @@ public class UndoStore {
         return !operations.isEmpty();
     }
 
+    public UndoStoreDelegate getDelegate() {
+        return delegate;
+    }
+
     public void setDelegate(UndoStoreDelegate undoStoreDelegate) {
         delegate = undoStoreDelegate;
     }
@@ -55,6 +59,12 @@ public class UndoStore {
         notifyOfHistoryChanges();
     }
 
+    public void clear() {
+        while (!operations.isEmpty()) {
+            undo();
+        }
+    }
+
     public void reset() {
         operations.clear();
         uuidToOperationMap.clear();
@@ -63,12 +73,9 @@ public class UndoStore {
     }
 
     private void notifyOfHistoryChanges() {
-        AndroidUtilities.runOnUIThread(new Runnable() {
-            @Override
-            public void run() {
-                if (delegate != null) {
-                    delegate.historyChanged();
-                }
+        AndroidUtilities.runOnUIThread(() -> {
+            if (delegate != null) {
+                delegate.historyChanged();
             }
         });
     }

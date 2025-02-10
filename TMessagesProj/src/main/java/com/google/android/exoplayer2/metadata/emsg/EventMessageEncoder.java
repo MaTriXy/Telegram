@@ -15,10 +15,6 @@
  */
 package com.google.android.exoplayer2.metadata.emsg;
 
-import androidx.annotation.Nullable;
-import com.google.android.exoplayer2.C;
-import com.google.android.exoplayer2.util.Assertions;
-import com.google.android.exoplayer2.util.Util;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -37,28 +33,20 @@ public final class EventMessageEncoder {
   }
 
   /**
-   * Encodes an {@link EventMessage} to a byte array that can be decoded by
-   * {@link EventMessageDecoder}.
+   * Encodes an {@link EventMessage} to a byte array that can be decoded by {@link
+   * EventMessageDecoder}.
    *
    * @param eventMessage The event message to be encoded.
-   * @param timescale Timescale of the event message, in units per second.
    * @return The serialized byte array.
    */
-  @Nullable
-  public byte[] encode(EventMessage eventMessage, long timescale) {
-    Assertions.checkArgument(timescale >= 0);
+  public byte[] encode(EventMessage eventMessage) {
     byteArrayOutputStream.reset();
     try {
       writeNullTerminatedString(dataOutputStream, eventMessage.schemeIdUri);
       String nonNullValue = eventMessage.value != null ? eventMessage.value : "";
       writeNullTerminatedString(dataOutputStream, nonNullValue);
-      writeUnsignedInt(dataOutputStream, timescale);
-      long presentationTime = Util.scaleLargeTimestamp(eventMessage.presentationTimeUs,
-          timescale, C.MICROS_PER_SECOND);
-      writeUnsignedInt(dataOutputStream, presentationTime);
-      long duration = Util.scaleLargeTimestamp(eventMessage.durationMs, timescale, 1000);
-      writeUnsignedInt(dataOutputStream, duration);
-      writeUnsignedInt(dataOutputStream, eventMessage.id);
+      dataOutputStream.writeLong(eventMessage.durationMs);
+      dataOutputStream.writeLong(eventMessage.id);
       dataOutputStream.write(eventMessage.messageData);
       dataOutputStream.flush();
       return byteArrayOutputStream.toByteArray();
@@ -73,13 +61,4 @@ public final class EventMessageEncoder {
     dataOutputStream.writeBytes(value);
     dataOutputStream.writeByte(0);
   }
-
-  private static void writeUnsignedInt(DataOutputStream outputStream, long value)
-      throws IOException {
-    outputStream.writeByte((int) (value >>> 24) & 0xFF);
-    outputStream.writeByte((int) (value >>> 16) & 0xFF);
-    outputStream.writeByte((int) (value >>> 8) & 0xFF);
-    outputStream.writeByte((int) value & 0xFF);
-  }
-
 }

@@ -21,6 +21,7 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.text.TextUtils;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewParent;
 import android.webkit.CookieManager;
@@ -54,6 +55,7 @@ import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ShareAlert;
 
 import java.net.URLEncoder;
+import java.util.ArrayList;
 
 public class WebviewActivity extends BaseFragment {
 
@@ -108,7 +110,7 @@ public class WebviewActivity extends BaseFragment {
             if (currentMessageObject == null || getParentActivity() == null || typingRunnable == null) {
                 return;
             }
-            MessagesController.getInstance(currentAccount).sendTyping(currentMessageObject.getDialogId(), 6, 0);
+            MessagesController.getInstance(currentAccount).sendTyping(currentMessageObject.getDialogId(), 0, 6, 0);
             AndroidUtilities.runOnUIThread(typingRunnable, 25000);
         }
     };
@@ -131,16 +133,10 @@ public class WebviewActivity extends BaseFragment {
         type = TYPE_STAT;
     }
 
-    /*@Override
-    protected void onTransitionAnimationStart(boolean isOpen, boolean backward) {
-        if (!isOpen) {
-
-        }
-    }*/
-
     @Override
     public void onFragmentDestroy() {
         super.onFragmentDestroy();
+        AndroidUtilities.checkAndroidTheme(getContext(), false);
         AndroidUtilities.cancelRunOnUIThread(typingRunnable);
         webView.setLayerType(View.LAYER_TYPE_NONE, null);
         typingRunnable = null;
@@ -161,7 +157,6 @@ public class WebviewActivity extends BaseFragment {
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
     public View createView(Context context) {
-        swipeBackEnabled = false;
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
 
@@ -184,7 +179,7 @@ public class WebviewActivity extends BaseFragment {
         progressItem = menu.addItemWithWidth(share, R.drawable.share, AndroidUtilities.dp(54));
         if (type == TYPE_GAME) {
             ActionBarMenuItem menuItem = menu.addItem(0, R.drawable.ic_ab_other);
-            menuItem.addSubItem(open_in, R.drawable.msg_openin, LocaleController.getString("OpenInExternalApp", R.string.OpenInExternalApp));
+            menuItem.addSubItem(open_in, R.drawable.msg_openin, LocaleController.getString(R.string.OpenInExternalApp));
 
             actionBar.setTitle(currentGame);
             actionBar.setSubtitle("@" + currentBot);
@@ -196,12 +191,13 @@ public class WebviewActivity extends BaseFragment {
             progressView.setScaleY(0.1f);
             progressView.setVisibility(View.INVISIBLE);
         } else if (type == TYPE_STAT) {
-            actionBar.setBackgroundColor(Theme.getColor(Theme.key_player_actionBar));
+            actionBar.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground));
             actionBar.setItemsColor(Theme.getColor(Theme.key_player_actionBarItems), false);
+            actionBar.setItemsColor(Theme.getColor(Theme.key_player_actionBarItems), true);
             actionBar.setItemsBackgroundColor(Theme.getColor(Theme.key_player_actionBarSelector), false);
             actionBar.setTitleColor(Theme.getColor(Theme.key_player_actionBarTitle));
             actionBar.setSubtitleColor(Theme.getColor(Theme.key_player_actionBarSubtitle));
-            actionBar.setTitle(LocaleController.getString("Statistics", R.string.Statistics));
+            actionBar.setTitle(LocaleController.getString(R.string.Statistics));
 
             progressView = new ContextProgressView(context, 3);
             progressItem.addView(progressView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
@@ -209,10 +205,11 @@ public class WebviewActivity extends BaseFragment {
             progressView.setScaleX(1.0f);
             progressView.setScaleY(1.0f);
             progressView.setVisibility(View.VISIBLE);
-            progressItem.getImageView().setVisibility(View.GONE);
+            progressItem.getContentView().setVisibility(View.GONE);
             progressItem.setEnabled(false);
         }
 
+        AndroidUtilities.checkAndroidTheme(context, true);
         webView = new WebView(context);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
@@ -221,6 +218,11 @@ public class WebviewActivity extends BaseFragment {
         FrameLayout frameLayout = (FrameLayout) fragmentView;
         if (Build.VERSION.SDK_INT >= 19) {
             webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            webView.getSettings().setLayoutAlgorithm(WebSettings.LayoutAlgorithm.TEXT_AUTOSIZING);
+        }
+
+        if (Build.VERSION.SDK_INT >= 17) {
+            webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
         }
 
         if (Build.VERSION.SDK_INT >= 21) {
@@ -283,15 +285,15 @@ public class WebviewActivity extends BaseFragment {
                 if (progressView != null && progressView.getVisibility() == View.VISIBLE) {
                     AnimatorSet animatorSet = new AnimatorSet();
                     if (type == TYPE_GAME) {
-                        progressItem.getImageView().setVisibility(View.VISIBLE);
+                        progressItem.getContentView().setVisibility(View.VISIBLE);
                         progressItem.setEnabled(true);
                         animatorSet.playTogether(
                                 ObjectAnimator.ofFloat(progressView, "scaleX", 1.0f, 0.1f),
                                 ObjectAnimator.ofFloat(progressView, "scaleY", 1.0f, 0.1f),
                                 ObjectAnimator.ofFloat(progressView, "alpha", 1.0f, 0.0f),
-                                ObjectAnimator.ofFloat(progressItem.getImageView(), "scaleX", 0.0f, 1.0f),
-                                ObjectAnimator.ofFloat(progressItem.getImageView(), "scaleY", 0.0f, 1.0f),
-                                ObjectAnimator.ofFloat(progressItem.getImageView(), "alpha", 0.0f, 1.0f));
+                                ObjectAnimator.ofFloat(progressItem.getContentView(), "scaleX", 0.0f, 1.0f),
+                                ObjectAnimator.ofFloat(progressItem.getContentView(), "scaleY", 0.0f, 1.0f),
+                                ObjectAnimator.ofFloat(progressItem.getContentView(), "alpha", 0.0f, 1.0f));
                     } else {
                         animatorSet.playTogether(
                                 ObjectAnimator.ofFloat(progressView, "scaleX", 1.0f, 0.1f),
@@ -327,10 +329,15 @@ public class WebviewActivity extends BaseFragment {
     }
 
     @Override
-    protected void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
+    public void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
         if (isOpen && !backward && webView != null) {
             webView.loadUrl(currentUrl);
         }
+    }
+
+    @Override
+    public boolean isSwipeBackEnabled(MotionEvent event) {
+        return false;
     }
 
     public static boolean supportWebview() {
@@ -350,7 +357,7 @@ public class WebviewActivity extends BaseFragment {
         }
         loadStats = true;
         TLRPC.TL_messages_getStatsURL req = new TLRPC.TL_messages_getStatsURL();
-        req.peer = MessagesController.getInstance(currentAccount).getInputPeer((int) currentDialogId);
+        req.peer = MessagesController.getInstance(currentAccount).getInputPeer(currentDialogId);
         req.params = params != null ? params : "";
         req.dark = Theme.getCurrentTheme().isDark();
         ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
@@ -406,38 +413,36 @@ public class WebviewActivity extends BaseFragment {
     }
 
     @Override
-    public ThemeDescription[] getThemeDescriptions() {
+    public ArrayList<ThemeDescription> getThemeDescriptions() {
+        ArrayList<ThemeDescription> themeDescriptions = new ArrayList<>();
         if (type == TYPE_GAME) {
-            return new ThemeDescription[]{
-                    new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundWhite),
+            themeDescriptions.add(new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundWhite));
 
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_actionBarDefaultIcon),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_actionBarDefaultTitle),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_actionBarDefaultSelector),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUBACKGROUND, null, null, null, null, Theme.key_actionBarDefaultSubmenuBackground),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUITEM, null, null, null, null, Theme.key_actionBarDefaultSubmenuItem),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUITEM | ThemeDescription.FLAG_IMAGECOLOR, null, null, null, null, Theme.key_actionBarDefaultSubmenuItemIcon),
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_actionBarDefaultIcon));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_actionBarDefaultTitle));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_actionBarDefaultSelector));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUBACKGROUND, null, null, null, null, Theme.key_actionBarDefaultSubmenuBackground));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUITEM, null, null, null, null, Theme.key_actionBarDefaultSubmenuItem));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUITEM | ThemeDescription.FLAG_IMAGECOLOR, null, null, null, null, Theme.key_actionBarDefaultSubmenuItemIcon));
 
-                    new ThemeDescription(progressView, 0, null, null, null, null, Theme.key_contextProgressInner2),
-                    new ThemeDescription(progressView, 0, null, null, null, null, Theme.key_contextProgressOuter2),
-            };
+            themeDescriptions.add(new ThemeDescription(progressView, 0, null, null, null, null, Theme.key_contextProgressInner2));
+            themeDescriptions.add(new ThemeDescription(progressView, 0, null, null, null, null, Theme.key_contextProgressOuter2));
         } else {
-            return new ThemeDescription[]{
-                    new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundWhite),
+            themeDescriptions.add(new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundWhite));
 
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_player_actionBar),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_player_actionBarItems),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_player_actionBarTitle),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBTITLECOLOR, null, null, null, null, Theme.key_player_actionBarTitle),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_player_actionBarSelector),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUBACKGROUND, null, null, null, null, Theme.key_actionBarDefaultSubmenuBackground),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUITEM, null, null, null, null, Theme.key_actionBarDefaultSubmenuItem),
-                    new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUITEM | ThemeDescription.FLAG_IMAGECOLOR, null, null, null, null, Theme.key_actionBarDefaultSubmenuItemIcon),
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_dialogBackground));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_player_actionBarItems));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_player_actionBarTitle));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBTITLECOLOR, null, null, null, null, Theme.key_player_actionBarTitle));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_player_actionBarSelector));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUBACKGROUND, null, null, null, null, Theme.key_actionBarDefaultSubmenuBackground));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUITEM, null, null, null, null, Theme.key_actionBarDefaultSubmenuItem));
+            themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SUBMENUITEM | ThemeDescription.FLAG_IMAGECOLOR, null, null, null, null, Theme.key_actionBarDefaultSubmenuItemIcon));
 
-                    new ThemeDescription(progressView, 0, null, null, null, null, Theme.key_contextProgressInner4),
-                    new ThemeDescription(progressView, 0, null, null, null, null, Theme.key_contextProgressOuter4),
-            };
+            themeDescriptions.add(new ThemeDescription(progressView, 0, null, null, null, null, Theme.key_contextProgressInner4));
+            themeDescriptions.add(new ThemeDescription(progressView, 0, null, null, null, null, Theme.key_contextProgressOuter4));
         }
+        return themeDescriptions;
     }
 }

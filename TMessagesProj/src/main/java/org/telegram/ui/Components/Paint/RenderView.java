@@ -1,7 +1,11 @@
 package org.telegram.ui.Components.Paint;
 
 import android.content.Context;
-import android.graphics.*;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Matrix;
+import android.graphics.RectF;
+import android.graphics.SurfaceTexture;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.os.Looper;
@@ -9,25 +13,30 @@ import android.view.MotionEvent;
 import android.view.TextureView;
 import android.view.View;
 
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.DispatchQueue;
+import org.telegram.messenger.FileLog;
+import org.telegram.ui.Components.BlurringShader;
+import org.telegram.ui.Components.Size;
+
+import java.util.concurrent.CountDownLatch;
+
 import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.egl.EGLContext;
 import javax.microedition.khronos.egl.EGLDisplay;
 import javax.microedition.khronos.egl.EGLSurface;
 
-import org.telegram.messenger.BuildVars;
-import org.telegram.messenger.DispatchQueue;
-import org.telegram.messenger.FileLog;
-import org.telegram.ui.Components.Size;
-
-import java.util.concurrent.CountDownLatch;
-
 public class RenderView extends TextureView {
 
     public interface RenderViewDelegate {
         void onBeganDrawing();
         void onFinishedDrawing(boolean moved);
+        void onFirstDraw();
         boolean shouldDraw();
+        default void invalidateInputView() {}
+        void resetBrush();
     }
 
     private RenderViewDelegate delegate;
@@ -37,9 +46,12 @@ public class RenderView extends TextureView {
     private Painting painting;
     private CanvasInternal internal;
     private Input input;
+    private ShapeInput shapeInput;
     private Bitmap bitmap;
+    private Bitmap blurBitmap;
     private boolean transformedBitmap;
-    private int orientation;
+
+    private boolean firstDrawSent;
 
     private float weight;
     private int color;
@@ -47,11 +59,12 @@ public class RenderView extends TextureView {
 
     private boolean shuttingDown;
 
-    public RenderView(Context context, Painting paint, Bitmap b, int rotation) {
+    public RenderView(Context context, Painting paint, Bitmap bitmap, Bitmap blurBitmap, BlurringShader.BlurManager blurManager) {
         super(context);
+        setOpaque(false);
 
-        bitmap = b;
-        orientation = rotation;
+        this.bitmap = bitmap;
+        this.blurBitmap = blurBitmap;
         painting = paint;
         painting.setRenderView(this);
 
@@ -61,12 +74,15 @@ public class RenderView extends TextureView {
                 if (surface == null || internal != null) {
                     return;
                 }
-
-                internal = new CanvasInternal(surface);
+                internal = new CanvasInternal(surface, blurManager);
                 internal.setBufferSize(width, height);
                 updateTransform();
 
-                internal.requestRender();
+                post(() -> {
+                    if (internal != null) {
+                        internal.requestRender();
+                    }
+                });
 
                 if (painting.isPaused()) {
                     painting.onResume();
@@ -82,12 +98,9 @@ public class RenderView extends TextureView {
                 internal.setBufferSize(width, height);
                 updateTransform();
                 internal.requestRender();
-                internal.postRunnable(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (internal != null) {
-                            internal.requestRender();
-                        }
+                internal.postRunnable(() -> {
+                    if (internal != null) {
+                        internal.requestRender();
                     }
                 });
             }
@@ -98,12 +111,9 @@ public class RenderView extends TextureView {
                     return true;
                 }
                 if (!shuttingDown) {
-                    painting.onPause(new Runnable() {
-                        @Override
-                        public void run() {
-                            internal.shutdown();
-                            internal = null;
-                        }
+                    painting.onPause(() -> {
+                        internal.shutdown();
+                        internal = null;
                     });
                 }
 
@@ -117,9 +127,14 @@ public class RenderView extends TextureView {
         });
 
         input = new Input(this);
+        shapeInput = new ShapeInput(this, () -> {
+            if (delegate != null) {
+                delegate.invalidateInputView();
+            }
+        });
         painting.setDelegate(new Painting.PaintingDelegate() {
             @Override
-            public void contentChanged(RectF rect) {
+            public void contentChanged() {
                 if (internal != null) {
                     internal.scheduleRedraw();
                 }
@@ -142,22 +157,36 @@ public class RenderView extends TextureView {
         });
     }
 
-    @Override
-    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+    public void redraw() {
+        if (internal == null) {
+            return;
+        }
+        internal.requestRender();
     }
 
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
+    public boolean onTouch(MotionEvent event) {
         if (event.getPointerCount() > 1) {
             return false;
         }
-
-        if (internal == null || !internal.initialized || !internal.ready)
+        if (internal == null || !internal.initialized || !internal.ready) {
             return true;
-
-        input.process(event);
+        }
+        if (brush instanceof Brush.Shape) {
+            shapeInput.process(event, getScaleX());
+        } else {
+            input.process(event, getScaleX());
+        }
         return true;
+    }
+
+    public void onDrawForInput(Canvas canvas) {
+        if (brush instanceof Brush.Shape) {
+            shapeInput.dispatchDraw(canvas);
+        }
+    }
+
+    public void onFillShapesToggle(Canvas canvas) {
+
     }
 
     public void setUndoStore(UndoStore store) {
@@ -176,7 +205,7 @@ public class RenderView extends TextureView {
         return painting;
     }
 
-    private float brushWeightForSize(float size) {
+    public float brushWeightForSize(float size) {
         float paintingWidth = painting.getSize().width;
         return 8.0f / 2048.0f * paintingWidth + (90.0f / 2048.0f * paintingWidth) * size;
     }
@@ -187,6 +216,9 @@ public class RenderView extends TextureView {
 
     public void setColor(int value) {
         color = value;
+        if (brush instanceof Brush.Shape) {
+            shapeInput.onColorChange();
+        }
     }
 
     public float getCurrentWeight() {
@@ -195,17 +227,48 @@ public class RenderView extends TextureView {
 
     public void setBrushSize(float size) {
         weight = brushWeightForSize(size);
+        if (brush instanceof Brush.Shape) {
+            shapeInput.onWeightChange();
+        }
     }
 
     public Brush getCurrentBrush() {
         return brush;
     }
 
+    public UndoStore getUndoStore() {
+        return undoStore;
+    }
+
     public void setBrush(Brush value) {
-        painting.setBrush(brush = value);
+        if (brush instanceof Brush.Shape) {
+            shapeInput.stop();
+        }
+        brush = value;
+        updateTransform();
+        painting.setBrush(brush);
+        if (brush instanceof Brush.Shape) {
+            shapeInput.start(((Brush.Shape) brush).getShapeShaderType());
+        }
+    }
+
+    public void resetBrush() {
+        if (delegate != null) {
+            delegate.resetBrush();
+        }
+        input.ignoreOnce();
+    }
+
+    public void clearShape() {
+        if (shapeInput != null) {
+            shapeInput.clear();
+        }
     }
 
     private void updateTransform() {
+        if (internal == null) {
+            return;
+        }
         Matrix matrix = new Matrix();
 
         float scale = painting != null ? getWidth() / painting.getSize().width : 1.0f;
@@ -219,11 +282,15 @@ public class RenderView extends TextureView {
         matrix.preScale(scale, -scale);
         matrix.preTranslate(-paintingSize.width / 2.0f, -paintingSize.height / 2.0f);
 
-        input.setMatrix(matrix);
+        if (brush instanceof Brush.Shape) {
+            shapeInput.setMatrix(matrix);
+        } else {
+            input.setMatrix(matrix);
+        }
 
-        float proj[] = GLMatrix.LoadOrtho(0.0f, internal.bufferWidth, 0.0f, internal.bufferHeight, -1.0f, 1.0f);
-        float effectiveProjection[] = GLMatrix.LoadGraphicsMatrix(matrix);
-        float finalProjection[] = GLMatrix.MultiplyMat4f(proj, effectiveProjection);
+        float[] proj = GLMatrix.LoadOrtho(0.0f, internal.bufferWidth, 0.0f, internal.bufferHeight, -1.0f, 1.0f);
+        float[] effectiveProjection = GLMatrix.LoadGraphicsMatrix(matrix);
+        float[] finalProjection = GLMatrix.MultiplyMat4f(proj, effectiveProjection);
         painting.setRenderProjection(finalProjection);
     }
 
@@ -247,30 +314,30 @@ public class RenderView extends TextureView {
         shuttingDown = true;
 
         if (internal != null) {
-            performInContext(new Runnable() {
-                @Override
-                public void run() {
-                    painting.cleanResources(transformedBitmap);
-                    internal.shutdown();
-                    internal = null;
-                }
+            performInContext(() -> {
+                painting.cleanResources(transformedBitmap);
+                internal.shutdown();
+                internal = null;
             });
         }
 
         setVisibility(View.GONE);
     }
 
+    public void clearAll() {
+        input.clear(() -> painting.setBrush(brush));
+    }
+
     private class CanvasInternal extends DispatchQueue {
-        private final int EGL_CONTEXT_CLIENT_VERSION = 0x3098;
-        private final int EGL_OPENGL_ES2_BIT = 4;
+        private static final int EGL_CONTEXT_CLIENT_VERSION = 0x3098;
+        private static final int EGL_OPENGL_ES2_BIT = 4;
         private SurfaceTexture surfaceTexture;
         private EGL10 egl10;
         private EGLDisplay eglDisplay;
-        private EGLConfig eglConfig;
         private EGLContext eglContext;
         private EGLSurface eglSurface;
         private boolean initialized;
-        private boolean ready;
+        private volatile boolean ready;
 
         private int bufferWidth;
         private int bufferHeight;
@@ -278,8 +345,11 @@ public class RenderView extends TextureView {
         private long lastRenderCallTime;
         private Runnable scheduledRunnable;
 
-        public CanvasInternal(SurfaceTexture surface) {
+        private final BlurringShader.BlurManager blurManager;
+
+        public CanvasInternal(SurfaceTexture surface, BlurringShader.BlurManager blurManager) {
             super("CanvasInternal");
+            this.blurManager = blurManager;
             surfaceTexture = surface;
         }
 
@@ -326,6 +396,7 @@ public class RenderView extends TextureView {
                     EGL10.EGL_STENCIL_SIZE, 0,
                     EGL10.EGL_NONE
             };
+            EGLConfig eglConfig;
             if (!egl10.eglChooseConfig(eglDisplay, configSpec, configs, 1, configsCount)) {
                 if (BuildVars.LOGS_ENABLED) {
                     FileLog.e("eglChooseConfig failed " + GLUtils.getEGLErrorString(egl10.eglGetError()));
@@ -343,13 +414,18 @@ public class RenderView extends TextureView {
             }
 
             int[] attrib_list = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL10.EGL_NONE};
-            eglContext = egl10.eglCreateContext(eglDisplay, eglConfig, EGL10.EGL_NO_CONTEXT, attrib_list);
+            EGLContext parentContext = blurManager != null ? blurManager.getParentContext() : EGL10.EGL_NO_CONTEXT;
+            eglContext = egl10.eglCreateContext(eglDisplay, eglConfig, parentContext, attrib_list);
             if (eglContext == null) {
                 if (BuildVars.LOGS_ENABLED) {
                     FileLog.e("eglCreateContext failed " + GLUtils.getEGLErrorString(egl10.eglGetError()));
                 }
                 finish();
                 return false;
+            }
+            if (blurManager != null) {
+                blurManager.acquiredContext(eglContext);
+                blurManager.attach(safeRequestRender);
             }
 
             if (surfaceTexture instanceof SurfaceTexture) {
@@ -381,7 +457,7 @@ public class RenderView extends TextureView {
 
             painting.setupShaders();
             checkBitmap();
-            painting.setBitmap(bitmap);
+            painting.setBitmap(bitmap, blurBitmap);
 
             Utils.HasGLError();
 
@@ -391,21 +467,23 @@ public class RenderView extends TextureView {
         private Bitmap createBitmap(Bitmap bitmap, float scale) {
             Matrix matrix = new Matrix();
             matrix.setScale(scale, scale);
-            matrix.postRotate(orientation);
             return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
         }
 
         private void checkBitmap() {
             Size paintingSize = painting.getSize();
-
-            if (bitmap.getWidth() != paintingSize.width || bitmap.getHeight() != paintingSize.height || orientation != 0) {
-                float bitmapWidth = bitmap.getWidth();
-                if (orientation % 360 == 90 || orientation % 360 == 270)
-                    bitmapWidth = bitmap.getHeight();
-
-                float scale = paintingSize.width / bitmapWidth;
-                bitmap = createBitmap(bitmap, scale);
-                orientation = 0;
+            if (bitmap.getWidth() != paintingSize.width || bitmap.getHeight() != paintingSize.height) {
+                Bitmap b = Bitmap.createBitmap((int) paintingSize.width, (int) paintingSize.height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(b);
+                canvas.drawBitmap(bitmap, null, new RectF(0, 0, paintingSize.width, paintingSize.height), null);
+                bitmap = b;
+                transformedBitmap = true;
+            }
+            if (blurBitmap != null && (blurBitmap.getWidth() != paintingSize.width || blurBitmap.getHeight() != paintingSize.height)) {
+                Bitmap b = Bitmap.createBitmap((int) paintingSize.width, (int) paintingSize.height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(b);
+                canvas.drawBitmap(blurBitmap, null, new RectF(0, 0, paintingSize.width, paintingSize.height), null);
+                blurBitmap = b;
                 transformedBitmap = true;
             }
         }
@@ -435,7 +513,7 @@ public class RenderView extends TextureView {
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
                 GLES20.glViewport(0, 0, bufferWidth, bufferHeight);
 
-                GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
                 painting.render();
@@ -443,14 +521,13 @@ public class RenderView extends TextureView {
                 GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA);
 
                 egl10.eglSwapBuffers(eglDisplay, eglSurface);
+                if (!firstDrawSent) {
+                    firstDrawSent = true;
+                    AndroidUtilities.runOnUIThread(() -> delegate.onFirstDraw());
+                }
 
                 if (!ready) {
-                    queue.postRunnable(new Runnable() {
-                        @Override
-                        public void run() {
-                            ready = true;
-                        }
-                    }, 200);
+                    ready = true;
                 }
             }
         };
@@ -461,13 +538,17 @@ public class RenderView extends TextureView {
         }
 
         public void requestRender() {
-            postRunnable(new Runnable() {
-                @Override
-                public void run() {
-                    drawRunnable.run();
-                }
-            });
+            postRunnable(drawRunnable);
         }
+
+        public Runnable safeRequestRender = () -> {
+            if (scheduledRunnable != null) {
+                cancelRunnable(scheduledRunnable);
+                scheduledRunnable = null;
+            }
+            cancelRunnable(drawRunnable);
+            postRunnable(drawRunnable);
+        };
 
         public void scheduleRedraw() {
             if (scheduledRunnable != null) {
@@ -475,12 +556,9 @@ public class RenderView extends TextureView {
                 scheduledRunnable = null;
             }
 
-            scheduledRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    scheduledRunnable = null;
-                    drawRunnable.run();
-                }
+            scheduledRunnable = () -> {
+                scheduledRunnable = null;
+                drawRunnable.run();
             };
 
             postRunnable(scheduledRunnable, 1);
@@ -493,6 +571,9 @@ public class RenderView extends TextureView {
                 eglSurface = null;
             }
             if (eglContext != null) {
+                if (blurManager != null) {
+                    blurManager.destroyedContext(eglContext);
+                }
                 egl10.eglDestroyContext(eglDisplay, eglContext);
                 eglContext = null;
             }
@@ -500,35 +581,38 @@ public class RenderView extends TextureView {
                 egl10.eglTerminate(eglDisplay);
                 eglDisplay = null;
             }
+            if (blurManager != null) {
+                blurManager.detach(safeRequestRender);
+            }
         }
 
         public void shutdown() {
-            postRunnable(new Runnable() {
-                @Override
-                public void run() {
-                    finish();
-                    Looper looper = Looper.myLooper();
-                    if (looper != null) {
-                        looper.quit();
-                    }
+            postRunnable(() -> {
+                finish();
+                Looper looper = Looper.myLooper();
+                if (looper != null) {
+                    looper.quit();
                 }
             });
         }
 
         public Bitmap getTexture() {
+            return getTexture(false, false);
+        }
+
+        public Bitmap getTexture(final boolean onlyBlur, final boolean includeBlur) {
             if (!initialized) {
                 return null;
             }
             final CountDownLatch countDownLatch = new CountDownLatch(1);
-            final Bitmap object[] = new Bitmap[1];
+            final Bitmap[] object = new Bitmap[1];
             try {
-                postRunnable(new Runnable() {
-                    @Override
-                    public void run() {
-                        Painting.PaintingData data = painting.getPaintingData(new RectF(0, 0, painting.getSize().width, painting.getSize().height), false);
+                postRunnable(() -> {
+                    Painting.PaintingData data = painting.getPaintingData(new RectF(0, 0, painting.getSize().width, painting.getSize().height), false, onlyBlur, includeBlur);
+                    if (data != null) {
                         object[0] = data.bitmap;
-                        countDownLatch.countDown();
                     }
+                    countDownLatch.countDown();
                 });
                 countDownLatch.await();
             } catch (Exception e) {
@@ -538,8 +622,11 @@ public class RenderView extends TextureView {
         }
     }
 
-    public Bitmap getResultBitmap() {
-        return internal != null ? internal.getTexture() : null;
+    public Bitmap getResultBitmap(boolean blurTex, boolean includeBlur) {
+        if (brush instanceof Brush.Shape) {
+            shapeInput.stop();
+        }
+        return internal != null ? internal.getTexture(blurTex, includeBlur) : null;
     }
 
     public void performInContext(final Runnable action) {
@@ -547,16 +634,15 @@ public class RenderView extends TextureView {
             return;
         }
 
-        internal.postRunnable(new Runnable() {
-            @Override
-            public void run() {
-                if (internal == null || !internal.initialized) {
-                    return;
-                }
-
-                internal.setCurrentContext();
-                action.run();
+        internal.postRunnable(() -> {
+            if (internal == null || !internal.initialized) {
+                return;
             }
+
+            internal.setCurrentContext();
+            action.run();
         });
     }
+
+    protected void selectBrush(Brush brush) {}
 }

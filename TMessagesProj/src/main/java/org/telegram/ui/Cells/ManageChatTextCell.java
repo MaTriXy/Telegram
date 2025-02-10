@@ -27,6 +27,7 @@ public class ManageChatTextCell extends FrameLayout {
     private SimpleTextView valueTextView;
     private ImageView imageView;
     private boolean divider;
+    private int dividerColor = 0;
 
     public ManageChatTextCell(Context context) {
         super(context);
@@ -57,6 +58,10 @@ public class ManageChatTextCell extends FrameLayout {
         return valueTextView;
     }
 
+    public void setDividerColor(int key) {
+        dividerColor = key;
+    }
+
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int width = MeasureSpec.getSize(widthMeasureSpec);
@@ -66,7 +71,11 @@ public class ManageChatTextCell extends FrameLayout {
         textView.measure(MeasureSpec.makeMeasureSpec(width - AndroidUtilities.dp(71 + 24), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(20), MeasureSpec.EXACTLY));
         imageView.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(height, MeasureSpec.AT_MOST));
 
-        setMeasuredDimension(width, AndroidUtilities.dp(56) + (divider ? 1 : 0));
+        setMeasuredDimension(width, getFullHeight() + (divider ? 1 : 0));
+    }
+
+    protected int getFullHeight() {
+        return AndroidUtilities.dp(56);
     }
 
     @Override
@@ -91,14 +100,18 @@ public class ManageChatTextCell extends FrameLayout {
         textView.setTextColor(color);
     }
 
-    public void setColors(String icon, String text) {
+    public void setColors(int iconColorKey, int text) {
         textView.setTextColor(Theme.getColor(text));
         textView.setTag(text);
-        imageView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(icon), PorterDuff.Mode.MULTIPLY));
-        imageView.setTag(icon);
+        imageView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(iconColorKey), PorterDuff.Mode.MULTIPLY));
+        imageView.setTag(iconColorKey);
     }
 
     public void setText(String text, String value, int resId, boolean needDivider) {
+        setText(text, value, resId, 5, needDivider);
+    }
+
+    public void setText(String text, String value, int resId, int paddingTop, boolean needDivider) {
         textView.setText(text);
         if (value != null) {
             valueTextView.setText(value);
@@ -106,7 +119,7 @@ public class ManageChatTextCell extends FrameLayout {
         } else {
             valueTextView.setVisibility(INVISIBLE);
         }
-        imageView.setPadding(0, AndroidUtilities.dp(7), 0, 0);
+        imageView.setPadding(0, AndroidUtilities.dp(paddingTop), 0, 0);
         imageView.setImageResource(resId);
         divider = needDivider;
         setWillNotDraw(!divider);
@@ -115,7 +128,10 @@ public class ManageChatTextCell extends FrameLayout {
     @Override
     protected void onDraw(Canvas canvas) {
         if (divider) {
-            canvas.drawLine(AndroidUtilities.dp(71), getMeasuredHeight() - 1, getMeasuredWidth(), getMeasuredHeight() - 1, Theme.dividerPaint);
+            if (dividerColor != 0) {
+                Theme.dividerExtraPaint.setColor(Theme.getColor(dividerColor));
+            }
+            canvas.drawLine(AndroidUtilities.dp(71), getMeasuredHeight() - 1, getMeasuredWidth(), getMeasuredHeight() - 1, dividerColor != 0 ? Theme.dividerExtraPaint : Theme.dividerPaint);
         }
     }
 }

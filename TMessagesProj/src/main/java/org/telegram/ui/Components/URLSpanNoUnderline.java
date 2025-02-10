@@ -14,11 +14,29 @@ import android.text.style.URLSpan;
 import android.view.View;
 
 import org.telegram.messenger.browser.Browser;
+import org.telegram.tgnet.TLObject;
 
 public class URLSpanNoUnderline extends URLSpan {
 
+    private boolean forceNoUnderline = false;
+    private TextStyleSpan.TextStyleRun style;
+    private TLObject object;
+
+    // Used to label video timestamps
+    public String label;
+
     public URLSpanNoUnderline(String url) {
-        super(url);
+        this(url, null);
+    }
+
+    public URLSpanNoUnderline(String url, boolean forceNoUnderline) {
+        this(url, null);
+        this.forceNoUnderline = forceNoUnderline;
+    }
+
+    public URLSpanNoUnderline(String url, TextStyleSpan.TextStyleRun run) {
+        super(url != null ? url.replace('\u202E', ' ') : url);
+        style = run;
     }
 
     @Override
@@ -33,8 +51,21 @@ public class URLSpanNoUnderline extends URLSpan {
     }
 
     @Override
-    public void updateDrawState(TextPaint ds) {
-        super.updateDrawState(ds);
-        ds.setUnderlineText(false);
+    public void updateDrawState(TextPaint p) {
+        int l = p.linkColor;
+        int c = p.getColor();
+        super.updateDrawState(p);
+        if (style != null) {
+            style.applyStyle(p);
+        }
+        p.setUnderlineText(l == c && !forceNoUnderline);
+    }
+
+    public void setObject(TLObject spanObject) {
+        this.object = spanObject;
+    }
+
+    public TLObject getObject() {
+        return object;
     }
 }

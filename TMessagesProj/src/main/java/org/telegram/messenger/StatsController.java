@@ -11,10 +11,12 @@ package org.telegram.messenger;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import org.telegram.messenger.utils.ImmutableByteArrayOutputStream;
+
 import java.io.File;
 import java.io.RandomAccessFile;
 
-public class StatsController {
+public class StatsController extends BaseController {
 
     public static final int TYPE_MOBILE = 0;
     public static final int TYPE_WIFI = 1;
@@ -27,17 +29,19 @@ public class StatsController {
     public static final int TYPE_PHOTOS = 4;
     public static final int TYPE_FILES = 5;
     public static final int TYPE_TOTAL = 6;
-    private static final int TYPES_COUNT = 7;
+    public static final int TYPE_MUSIC = 7;
+    private static final int OLD_TYPES_COUNT = 7;
+    private static final int TYPES_COUNT = 8;
 
     private byte[] buffer = new byte[8];
 
     private long lastInternalStatsSaveTime;
-    private long sentBytes[][] = new long[3][TYPES_COUNT];
-    private long receivedBytes[][] = new long[3][TYPES_COUNT];
-    private int sentItems[][] = new int[3][TYPES_COUNT];
-    private int receivedItems[][] = new int[3][TYPES_COUNT];
-    private long resetStatsDate[] = new long[3];
-    private int callsTotalTime[] = new int[3];
+    private long[][] sentBytes = new long[3][TYPES_COUNT];
+    private long[][] receivedBytes = new long[3][TYPES_COUNT];
+    private int[][] sentItems = new int[3][TYPES_COUNT];
+    private int[][] receivedItems = new int[3][TYPES_COUNT];
+    private long[] resetStatsDate = new long[3];
+    private int[] callsTotalTime = new int[3];
     private RandomAccessFile statsFile;
     private static DispatchQueue statsSaveQueue = new DispatchQueue("statsSaveQueue");
 
@@ -76,6 +80,7 @@ public class StatsController {
         return ((long) bytes[0] & 0xFF) << 56 | ((long) bytes[1] & 0xFF) << 48 | ((long) bytes[2] & 0xFF) << 40 | ((long) bytes[3] & 0xFF) << 32 | ((long) bytes[4] & 0xFF) << 24 | ((long) bytes[5] & 0xFF) << 16 | ((long) bytes[6] & 0xFF) << 8 | ((long) bytes[7] & 0xFF);
     }
 
+    ImmutableByteArrayOutputStream byteArrayOutputStream = new ImmutableByteArrayOutputStream();
     private Runnable saveRunnable = new Runnable() {
         @Override
         public void run() {
@@ -85,17 +90,27 @@ public class StatsController {
             }
             lastInternalStatsSaveTime = newTime;
             try {
-                statsFile.seek(0);
+                byteArrayOutputStream.reset();
                 for (int a = 0; a < 3; a++) {
-                    for (int b = 0; b < TYPES_COUNT; b++) {
-                        statsFile.write(longToBytes(sentBytes[a][b]), 0, 8);
-                        statsFile.write(longToBytes(receivedBytes[a][b]), 0, 8);
-                        statsFile.write(intToBytes(sentItems[a][b]), 0, 4);
-                        statsFile.write(intToBytes(receivedItems[a][b]), 0, 4);
+                    for (int b = 0; b < OLD_TYPES_COUNT; b++) {
+                        byteArrayOutputStream.write(longToBytes(sentBytes[a][b]), 0, 8);
+                        byteArrayOutputStream.write(longToBytes(receivedBytes[a][b]), 0, 8);
+                        byteArrayOutputStream.write(intToBytes(sentItems[a][b]), 0, 4);
+                        byteArrayOutputStream.write(intToBytes(receivedItems[a][b]), 0, 4);
                     }
-                    statsFile.write(intToBytes(callsTotalTime[a]), 0, 4);
-                    statsFile.write(longToBytes(resetStatsDate[a]), 0, 8);
+                    byteArrayOutputStream.write(intToBytes(callsTotalTime[a]), 0, 4);
+                    byteArrayOutputStream.write(longToBytes(resetStatsDate[a]), 0, 8);
                 }
+                for (int b = OLD_TYPES_COUNT; b < TYPES_COUNT; ++b) {
+                    for (int a = 0; a < 3; ++a) {
+                        byteArrayOutputStream.write(longToBytes(sentBytes[a][b]), 0, 8);
+                        byteArrayOutputStream.write(longToBytes(receivedBytes[a][b]), 0, 8);
+                        byteArrayOutputStream.write(intToBytes(sentItems[a][b]), 0, 4);
+                        byteArrayOutputStream.write(intToBytes(receivedItems[a][b]), 0, 4);
+                    }
+                }
+                statsFile.seek(0);
+                statsFile.write(byteArrayOutputStream.buf, 0, byteArrayOutputStream.count());
                 statsFile.getFD().sync();
             } catch (Exception ignore) {
 
@@ -103,7 +118,7 @@ public class StatsController {
         }
     };
 
-    private static volatile StatsController Instance[] = new StatsController[UserConfig.MAX_ACCOUNT_COUNT];
+    private static volatile StatsController[] Instance = new StatsController[UserConfig.MAX_ACCOUNT_COUNT];
 
     public static StatsController getInstance(int num) {
         StatsController localInstance = Instance[num];
@@ -119,6 +134,7 @@ public class StatsController {
     }
 
     private StatsController(int account) {
+        super(account);
         File filesDir = ApplicationLoader.getFilesDirFixed();
         if (account != 0) {
             filesDir = new File(ApplicationLoader.getFilesDirFixed(), "account" + account + "/");
@@ -131,7 +147,7 @@ public class StatsController {
             if (statsFile.length() > 0) {
                 boolean save = false;
                 for (int a = 0; a < 3; a++) {
-                    for (int b = 0; b < TYPES_COUNT; b++) {
+                    for (int b = 0; b < OLD_TYPES_COUNT; b++) {
                         statsFile.readFully(buffer, 0, 8);
                         sentBytes[a][b] = bytesToLong(buffer);
                         statsFile.readFully(buffer, 0, 8);
@@ -148,6 +164,18 @@ public class StatsController {
                     if (resetStatsDate[a] == 0) {
                         save = true;
                         resetStatsDate[a] = System.currentTimeMillis();
+                    }
+                }
+                for (int b = OLD_TYPES_COUNT; b < TYPES_COUNT; ++b) {
+                    for (int a = 0; a < 3; ++a) {
+                        statsFile.readFully(buffer, 0, 8);
+                        sentBytes[a][b] = bytesToLong(buffer);
+                        statsFile.readFully(buffer, 0, 8);
+                        receivedBytes[a][b] = bytesToLong(buffer);
+                        statsFile.readFully(buffer, 0, 4);
+                        sentItems[a][b] = bytesToInt(buffer);
+                        statsFile.readFully(buffer, 0, 4);
+                        receivedItems[a][b] = bytesToInt(buffer);
                     }
                 }
                 if (save) {
@@ -221,14 +249,14 @@ public class StatsController {
 
     public long getSentBytesCount(int networkType, int dataType) {
         if (dataType == TYPE_MESSAGES) {
-            return sentBytes[networkType][TYPE_TOTAL] - sentBytes[networkType][TYPE_FILES] - sentBytes[networkType][TYPE_AUDIOS] - sentBytes[networkType][TYPE_VIDEOS] - sentBytes[networkType][TYPE_PHOTOS];
+            return sentBytes[networkType][TYPE_TOTAL] - sentBytes[networkType][TYPE_FILES] - sentBytes[networkType][TYPE_AUDIOS] - sentBytes[networkType][TYPE_VIDEOS] - sentBytes[networkType][TYPE_PHOTOS] - sentBytes[networkType][TYPE_MUSIC];
         }
         return sentBytes[networkType][dataType];
     }
 
     public long getReceivedBytesCount(int networkType, int dataType) {
         if (dataType == TYPE_MESSAGES) {
-            return receivedBytes[networkType][TYPE_TOTAL] - receivedBytes[networkType][TYPE_FILES] - receivedBytes[networkType][TYPE_AUDIOS] - receivedBytes[networkType][TYPE_VIDEOS] - receivedBytes[networkType][TYPE_PHOTOS];
+            return receivedBytes[networkType][TYPE_TOTAL] - receivedBytes[networkType][TYPE_FILES] - receivedBytes[networkType][TYPE_AUDIOS] - receivedBytes[networkType][TYPE_VIDEOS] - receivedBytes[networkType][TYPE_PHOTOS] - receivedBytes[networkType][TYPE_MUSIC];
         }
         return receivedBytes[networkType][dataType];
     }
@@ -257,6 +285,7 @@ public class StatsController {
         long newTime = System.currentTimeMillis();
         if (Math.abs(newTime - lastStatsSaveTime.get()) >= 2000) {
             lastStatsSaveTime.set(newTime);
+            statsSaveQueue.cancelRunnable(saveRunnable);
             statsSaveQueue.postRunnable(saveRunnable);
         }
     }

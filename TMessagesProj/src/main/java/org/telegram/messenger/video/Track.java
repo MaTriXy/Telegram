@@ -11,6 +11,7 @@ package org.telegram.messenger.video;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
+import android.util.Log;
 
 import com.coremedia.iso.boxes.AbstractMediaHeaderBox;
 import com.coremedia.iso.boxes.SampleDescriptionBox;
@@ -25,8 +26,10 @@ import com.googlecode.mp4parser.boxes.mp4.objectdescriptors.DecoderConfigDescrip
 import com.googlecode.mp4parser.boxes.mp4.objectdescriptors.ESDescriptor;
 import com.googlecode.mp4parser.boxes.mp4.objectdescriptors.SLConfigDescriptor;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -35,7 +38,7 @@ import java.util.Map;
 
 public class Track {
 
-    private class SamplePresentationTime {
+    private static class SamplePresentationTime {
 
         private int index;
         private long presentationTime;
@@ -203,6 +206,58 @@ public class Track {
                 visualSampleEntry.setHeight(height);
 
                 sampleDescriptionBox.addBox(visualSampleEntry);
+            } else if (mime.equals("video/hevc")) {
+                if (format.getByteBuffer("csd-0") != null) {
+                    ByteBuffer byteBuffer = format.getByteBuffer("csd-0");
+                    byte bytes[] = byteBuffer.array();
+                    int vpsPosition = -1;
+                    int spsPosition = -1;
+                    int ppsPosition = -1;
+                    int countBufferInititation = 0;
+                    for (int i = 0; i < bytes.length; i++) {
+                        if (countBufferInititation == 3 && bytes[i] == 1) {
+                            if (vpsPosition == -1) {
+                                vpsPosition = i - 3;
+                            } else if (spsPosition == -1) {
+                                spsPosition = i - 3;
+                            } else if (ppsPosition == -1) {
+                                ppsPosition = i - 3;
+                            }
+                        }
+                        if (bytes[i] == 0) {
+                            countBufferInititation++;
+                        } else {
+                            countBufferInititation = 0;
+                        }
+                    }
+                    byte[] vps = new byte[spsPosition - 4];
+                    byte[] sps = new byte[ppsPosition - spsPosition - 4];
+                    byte[] pps = new byte[bytes.length - ppsPosition - 4];
+                    for (int i = 0; i < bytes.length; i++) {
+                        if (i < spsPosition) {
+                            if (i - 4 >= 0) {
+                                vps[i - 4] = bytes[i];
+                            }
+                        } else if (i < ppsPosition) {
+                            if (i - spsPosition - 4 >= 0) {
+                                sps[i - spsPosition - 4] = bytes[i];
+                            }
+                        } else {
+                            if (i - ppsPosition - 4 >= 0) {
+                                pps[i - ppsPosition - 4] = bytes[i];
+                            }
+                        }
+                    }
+
+                    try {
+                        VisualSampleEntry visualSampleEntry = HevcDecoderConfigurationRecord.parseFromCsd(Arrays.asList(ByteBuffer.wrap(vps),ByteBuffer.wrap(pps), ByteBuffer.wrap(sps)));
+                        visualSampleEntry.setWidth(width);
+                        visualSampleEntry.setHeight(height);
+                        sampleDescriptionBox.addBox(visualSampleEntry);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
             }
         } else {
             volume = 1;
@@ -224,8 +279,19 @@ public class Track {
             slConfigDescriptor.setPredefined(2);
             descriptor.setSlConfigDescriptor(slConfigDescriptor);
 
+            String mime;
+            if (format.containsKey("mime")) {
+                mime = format.getString("mime");
+            } else {
+                mime = "audio/mp4-latm";
+            }
+
             DecoderConfigDescriptor decoderConfigDescriptor = new DecoderConfigDescriptor();
-            decoderConfigDescriptor.setObjectTypeIndication(0x40);
+            if ("audio/mpeg".equals(mime)) {
+                decoderConfigDescriptor.setObjectTypeIndication(0x69);
+            } else {
+                decoderConfigDescriptor.setObjectTypeIndication(0x40);
+            }
             decoderConfigDescriptor.setStreamType(5);
             decoderConfigDescriptor.setBufferSizeDB(1536);
             if (format.containsKey("max-bitrate")) {
@@ -244,7 +310,7 @@ public class Track {
             descriptor.setDecoderConfigDescriptor(decoderConfigDescriptor);
 
             ByteBuffer data = descriptor.serialize();
-            esds.setEsDescriptor(descriptor);
+            //esds.setEsDescriptor(descriptor);
             esds.setData(data);
             audioSampleEntry.addBox(esds);
             sampleDescriptionBox.addBox(audioSampleEntry);
@@ -265,6 +331,8 @@ public class Track {
     }
 
     public void prepare() {
+        duration = 0;
+
         ArrayList<SamplePresentationTime> original = new ArrayList<>(samplePresentationTimes);
         Collections.sort(samplePresentationTimes, (o1, o2) -> {
             if (o1.presentationTime > o2.presentationTime) {
@@ -286,7 +354,7 @@ public class Track {
             if (presentationTime.index != 0) {
                 duration += delta;
             }
-            if (delta != 0) {
+            if (delta > 0 && delta < Integer.MAX_VALUE) {
                 minDelta = Math.min(minDelta, delta);
             }
             if (presentationTime.index != a) {
@@ -315,6 +383,10 @@ public class Track {
 
     public ArrayList<Sample> getSamples() {
         return samples;
+    }
+
+    public long getLastFrameTimestamp() {
+        return ((duration - sampleDurations[sampleDurations.length - 1]) * 1000000 - 500000) / timeScale;
     }
 
     public long getDuration() {

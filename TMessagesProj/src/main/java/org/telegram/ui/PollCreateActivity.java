@@ -1,29 +1,50 @@
 package org.telegram.ui;
 
+import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.hideKeyboard;
+
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
-import android.animation.AnimatorSet;
-import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.text.Editable;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.style.ImageSpan;
+import android.view.ActionMode;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.Menu;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.widget.FrameLayout;
 
+import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ChatObject;
+import org.telegram.messenger.Emoji;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.MediaDataController;
+import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.Utilities;
+import org.telegram.tgnet.SerializedData;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
+import org.telegram.ui.ActionBar.AdjustPanLayoutHelper;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.SimpleTextView;
@@ -32,29 +53,67 @@ import org.telegram.ui.ActionBar.ThemeDescription;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.PollEditTextCell;
 import org.telegram.ui.Cells.ShadowSectionCell;
+import org.telegram.ui.Cells.TextCell;
+import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
-import org.telegram.ui.Cells.TextSettingsCell;
-import org.telegram.ui.Components.ContextProgressView;
+import org.telegram.ui.Components.AlertsCreator;
+import org.telegram.ui.Components.AnimatedEmojiSpan;
+import org.telegram.ui.Components.ChatActivityEnterViewAnimatedIconView;
+import org.telegram.ui.Components.ChatAttachAlertPollLayout;
+import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.EditTextBoldCursor;
+import org.telegram.ui.Components.EmojiView;
+import org.telegram.ui.Components.HintView;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.SizeNotifierFrameLayout;
+import org.telegram.ui.Components.SuggestEmojiView;
+import org.telegram.ui.Stories.recorder.KeyboardNotifier;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 
 import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-public class PollCreateActivity extends BaseFragment {
+public class PollCreateActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate, SizeNotifierFrameLayout.SizeNotifierFrameLayoutDelegate {
 
     private ActionBarMenuItem doneItem;
-    private AnimatorSet doneItemAnimation;
-    private ContextProgressView progressView;
     private ListAdapter listAdapter;
     private RecyclerListView listView;
+    private RecyclerView.LayoutManager layoutManager;
+    private SizeNotifierFrameLayout sizeNotifierFrameLayout;
+    private ChatActivity parentFragment;
+    private HintView hintView;
 
-    private String[] answers = new String[10];
+    private CharSequence[] answers = new CharSequence[10];
+    private boolean[] answersChecks = new boolean[10];
     private int answersCount = 1;
-    private String questionString;
+    private CharSequence questionString;
+    private CharSequence solutionString;
+    private boolean anonymousPoll = true;
+    private boolean multipleChoise;
+    private boolean quizPoll;
+    private boolean hintShowed;
+    private int quizOnly;
+
+    public boolean emojiViewVisible, emojiViewWasVisible;
+
+    private SuggestEmojiView suggestEmojiPanel;
+    private EmojiView emojiView;
+    private KeyboardNotifier keyboardNotifier;
+    private boolean waitingForKeyboardOpen;
+    private boolean destroyed;
+    private int emojiPadding;
+    private int keyboardHeight, keyboardHeightLand;
+    private boolean keyboardVisible, isAnimatePopupClosing;
+    private int lastSizeChangeValue1;
+    private boolean lastSizeChangeValue2;
+    private PollEditTextCell currentCell;
+    private boolean isPremium;
 
     private PollCreateActivityDelegate delegate;
 
@@ -62,20 +121,24 @@ public class PollCreateActivity extends BaseFragment {
 
     private int questionHeaderRow;
     private int questionRow;
+    private int solutionRow;
+    private int solutionInfoRow;
     private int questionSectionRow;
     private int answerHeaderRow;
     private int answerStartRow;
     private int addAnswerRow;
     private int answerSectionRow;
+    private int settingsHeaderRow;
+    private int anonymousRow;
+    private int multipleRow;
+    private int quizRow;
+    private int settingsSectionRow;
     private int rowCount;
-
-    private static final int MAX_QUESTION_LENGTH = 255;
-    private static final int MAX_ANSWER_LENGTH = 100;
 
     private static final int done_button = 1;
 
     public interface PollCreateActivityDelegate {
-        void sendPoll(TLRPC.TL_messageMediaPoll poll);
+        void sendPoll(TLRPC.TL_messageMediaPoll poll, HashMap<String, String> params, boolean notify, int scheduleDate);
     }
 
     public class TouchHelperCallback extends ItemTouchHelper.Callback {
@@ -128,6 +191,31 @@ public class PollCreateActivity extends BaseFragment {
         }
     }
 
+    private Runnable openKeyboardRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (currentCell != null) {
+                EditTextBoldCursor editText = currentCell.getEditField();
+                if (!destroyed && editText != null && waitingForKeyboardOpen && !keyboardVisible && !AndroidUtilities.usingHardwareInput && !AndroidUtilities.isInMultiwindow && AndroidUtilities.isTablet()) {
+                    editText.requestFocus();
+                    AndroidUtilities.showKeyboard(editText);
+                    AndroidUtilities.cancelRunOnUIThread(openKeyboardRunnable);
+                    AndroidUtilities.runOnUIThread(openKeyboardRunnable, 100);
+                }
+            }
+        }
+    };
+
+    public PollCreateActivity(ChatActivity chatActivity, Boolean quiz) {
+        super();
+        parentFragment = chatActivity;
+        isPremium = AccountInstance.getInstance(currentAccount).getUserConfig().isPremium();
+        if (quiz != null) {
+            quizPoll = quiz;
+            quizOnly = quizPoll ? 1 : 2;
+        }
+    }
+
     @Override
     public boolean onFragmentCreate() {
         super.onFragmentCreate();
@@ -138,7 +226,11 @@ public class PollCreateActivity extends BaseFragment {
     @Override
     public View createView(Context context) {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
-        actionBar.setTitle(LocaleController.getString("NewPoll", R.string.NewPoll));
+        if (quizOnly == 1) {
+            actionBar.setTitle(LocaleController.getString(R.string.NewQuiz));
+        } else {
+            actionBar.setTitle(LocaleController.getString(R.string.NewPoll));
+        }
         if (AndroidUtilities.isTablet()) {
             actionBar.setOccupyStatusBar(false);
         }
@@ -151,61 +243,249 @@ public class PollCreateActivity extends BaseFragment {
                         finishFragment();
                     }
                 } else if (id == done_button) {
+                    if (quizPoll && doneItem.getAlpha() != 1.0f) {
+                        int checksCount = 0;
+                        for (int a = 0; a < answersChecks.length; a++) {
+                            if (!TextUtils.isEmpty(ChatAttachAlertPollLayout.getFixedString(answers[a])) && answersChecks[a]) {
+                                checksCount++;
+                            }
+                        }
+                        if (checksCount <= 0) {
+                            showQuizHint();
+                        }
+                        return;
+                    }
+                    CharSequence questionText = ChatAttachAlertPollLayout.getFixedString(questionString);
+                    CharSequence[] questionCharSequence = new CharSequence[]{ questionText };
+                    ArrayList<TLRPC.MessageEntity> questionEntities = MediaDataController.getInstance(currentAccount).getEntities(questionCharSequence, true);
+                    questionText = questionCharSequence[0];
+                    for (int a = 0, N = questionEntities.size(); a < N; a++) {
+                        TLRPC.MessageEntity entity = questionEntities.get(a);
+                        if (entity.offset + entity.length > questionText.length()) {
+                            entity.length = questionText.length() - entity.offset;
+                        }
+                    }
+
                     TLRPC.TL_messageMediaPoll poll = new TLRPC.TL_messageMediaPoll();
                     poll.poll = new TLRPC.TL_poll();
-                    poll.poll.question = getFixedString(questionString);
+                    poll.poll.multiple_choice = multipleChoise;
+                    poll.poll.quiz = quizPoll;
+                    poll.poll.public_voters = !anonymousPoll;
+                    poll.poll.question = new TLRPC.TL_textWithEntities();
+                    poll.poll.question.text = questionText.toString();
+                    poll.poll.question.entities = questionEntities;
+                    SerializedData serializedData = new SerializedData(10);
                     for (int a = 0; a < answers.length; a++) {
-                        if (TextUtils.isEmpty(getFixedString(answers[a]))) {
+                        if (TextUtils.isEmpty(ChatAttachAlertPollLayout.getFixedString(answers[a]))) {
                             continue;
                         }
-                        TLRPC.TL_pollAnswer answer = new TLRPC.TL_pollAnswer();
-                        answer.text = getFixedString(answers[a]);
+                        CharSequence answerText = ChatAttachAlertPollLayout.getFixedString(answers[a]);
+                        CharSequence[] answerCharSequence = new CharSequence[]{ answerText };
+                        ArrayList<TLRPC.MessageEntity> answerEntities = MediaDataController.getInstance(currentAccount).getEntities(answerCharSequence, true);
+                        answerText = answerCharSequence[0];
+                        for (int b = 0, N = answerEntities.size(); b < N; b++) {
+                            TLRPC.MessageEntity entity = answerEntities.get(b);
+                            if (entity.offset + entity.length > answerText.length()) {
+                                entity.length = answerText.length() - entity.offset;
+                            }
+                        }
+                        TLRPC.PollAnswer answer = new TLRPC.TL_pollAnswer();
+                        answer.text = new TLRPC.TL_textWithEntities();
+                        answer.text.text = answerText.toString();
+                        answer.text.entities = answerEntities;
                         answer.option = new byte[1];
                         answer.option[0] = (byte) (48 + poll.poll.answers.size());
                         poll.poll.answers.add(answer);
+                        if ((multipleChoise || quizPoll) && answersChecks[a]) {
+                            serializedData.writeByte(answer.option[0]);
+                        }
                     }
+                    HashMap<String, String> params = new HashMap<>();
+                    params.put("answers", Utilities.bytesToHex(serializedData.toByteArray()));
                     poll.results = new TLRPC.TL_pollResults();
-                    delegate.sendPoll(poll);
-                    finishFragment();
+                    CharSequence solution = ChatAttachAlertPollLayout.getFixedString(solutionString);
+                    if (solution != null) {
+                        poll.results.solution = solution.toString();
+                        CharSequence[] message = new CharSequence[]{solution};
+                        ArrayList<TLRPC.MessageEntity> entities = getMediaDataController().getEntities(message, true);
+                        if (entities != null && !entities.isEmpty()) {
+                            poll.results.solution_entities = entities;
+                        }
+                        if (!TextUtils.isEmpty(poll.results.solution)) {
+                            poll.results.flags |= 16;
+                        }
+                    }
+                    if (parentFragment.isInScheduleMode()) {
+                        AlertsCreator.createScheduleDatePickerDialog(getParentActivity(), parentFragment.getDialogId(), (notify, scheduleDate) -> {
+                            delegate.sendPoll(poll, params, notify, scheduleDate);
+                            finishFragment();
+                        });
+                    } else {
+                        delegate.sendPoll(poll, params, true, 0);
+                        finishFragment();
+                    }
                 }
             }
         });
 
         ActionBarMenu menu = actionBar.createMenu();
-        doneItem = menu.addItemWithWidth(done_button, R.drawable.ic_done, AndroidUtilities.dp(56), LocaleController.getString("Done", R.string.Done));
-        progressView = new ContextProgressView(context, 1);
-        progressView.setAlpha(0.0f);
-        progressView.setScaleX(0.1f);
-        progressView.setScaleY(0.1f);
-        progressView.setVisibility(View.INVISIBLE);
-        doneItem.addView(progressView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        doneItem = menu.addItem(done_button, LocaleController.getString(R.string.Create).toUpperCase());
 
         listAdapter = new ListAdapter(context);
 
-        fragmentView = new FrameLayout(context);
+        sizeNotifierFrameLayout = new SizeNotifierFrameLayout(context) {
+
+            private boolean ignoreLayout;
+
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                int widthSize = MeasureSpec.getSize(widthMeasureSpec);
+                int heightSize = MeasureSpec.getSize(heightMeasureSpec);
+
+                setMeasuredDimension(widthSize, heightSize);
+                heightSize -= getPaddingTop();
+
+                measureChildWithMargins(actionBar, widthMeasureSpec, 0, heightMeasureSpec, 0);
+
+                int keyboardSize = measureKeyboardHeight();
+                if (keyboardSize > AndroidUtilities.dp(20) && !emojiViewVisible && !isEmojiSearchOpened) {
+                    ignoreLayout = true;
+                    hideEmojiView();
+                    ignoreLayout = false;
+                }
+
+                int keyboardPad = 0;
+                if (keyboardSize <= AndroidUtilities.dp(20) && !AndroidUtilities.isInMultiwindow && !AndroidUtilities.isTablet()) {
+                    keyboardPad = getEmojiPadding();
+                }
+                if (keyboardSize > AndroidUtilities.dp(20) && isEmojiSearchOpened) {
+                    keyboardPad = AndroidUtilities.dp(120);
+                }
+                int childCount = getChildCount();
+                for (int i = 0; i < childCount; i++) {
+                    View child = getChildAt(i);
+                    if (child == null || child.getVisibility() == GONE || child == actionBar) {
+                        continue;
+                    }
+                    if (emojiView != null && emojiView == child) {
+                        if (AndroidUtilities.isInMultiwindow || AndroidUtilities.isTablet()) {
+                            if (AndroidUtilities.isTablet()) {
+                                child.measure(MeasureSpec.makeMeasureSpec(widthSize, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(Math.min(AndroidUtilities.dp(AndroidUtilities.isTablet() ? 200 : 320), heightSize - AndroidUtilities.statusBarHeight + getPaddingTop()), MeasureSpec.EXACTLY));
+                            } else {
+                                child.measure(MeasureSpec.makeMeasureSpec(widthSize, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(heightSize - AndroidUtilities.statusBarHeight + getPaddingTop(), MeasureSpec.EXACTLY));
+                            }
+                        } else {
+                            child.measure(MeasureSpec.makeMeasureSpec(widthSize, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(child.getLayoutParams().height, MeasureSpec.EXACTLY));
+                        }
+                    } else if (listView == child) {
+                        child.measure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(heightSize - keyboardPad, MeasureSpec.EXACTLY));
+                    } else {
+                        measureChildWithMargins(child, widthMeasureSpec, 0, heightMeasureSpec, 0);
+                    }
+                }
+            }
+
+            @Override
+            protected void onLayout(boolean changed, int l, int t, int r, int b) {
+                final int count = getChildCount();
+
+                int keyboardSize = measureKeyboardHeight();
+                int paddingBottom = keyboardSize <= AndroidUtilities.dp(20) && !AndroidUtilities.isInMultiwindow && !AndroidUtilities.isTablet() ? getEmojiPadding() : 0;
+                setBottomClip(paddingBottom);
+
+                for (int i = 0; i < count; i++) {
+                    final View child = getChildAt(i);
+                    if (child.getVisibility() == GONE) {
+                        continue;
+                    }
+                    final LayoutParams lp = (LayoutParams) child.getLayoutParams();
+
+                    final int width = child.getMeasuredWidth();
+                    final int height = child.getMeasuredHeight();
+
+                    int childLeft;
+                    int childTop;
+
+                    int gravity = lp.gravity;
+                    if (gravity == -1) {
+                        gravity = Gravity.TOP | Gravity.LEFT;
+                    }
+
+                    final int absoluteGravity = gravity & Gravity.HORIZONTAL_GRAVITY_MASK;
+                    final int verticalGravity = gravity & Gravity.VERTICAL_GRAVITY_MASK;
+
+                    switch (absoluteGravity & Gravity.HORIZONTAL_GRAVITY_MASK) {
+                        case Gravity.CENTER_HORIZONTAL:
+                            childLeft = (r - l - width) / 2 + lp.leftMargin - lp.rightMargin;
+                            break;
+                        case Gravity.RIGHT:
+                            childLeft = r - width - lp.rightMargin;
+                            break;
+                        case Gravity.LEFT:
+                        default:
+                            childLeft = lp.leftMargin;
+                    }
+
+                    switch (verticalGravity) {
+                        case Gravity.TOP:
+                            childTop = lp.topMargin + getPaddingTop();
+                            break;
+                        case Gravity.CENTER_VERTICAL:
+                            childTop = ((b - paddingBottom) - t - height) / 2 + lp.topMargin - lp.bottomMargin;
+                            break;
+                        case Gravity.BOTTOM:
+                            childTop = ((b - paddingBottom) - t) - height - lp.bottomMargin;
+                            break;
+                        default:
+                            childTop = lp.topMargin;
+                    }
+
+                    if (emojiView != null && emojiView == child) {
+                        if (AndroidUtilities.isTablet()) {
+                            childTop = getMeasuredHeight() - child.getMeasuredHeight();
+                        } else {
+                            childTop = getMeasuredHeight() + keyboardSize - child.getMeasuredHeight();
+                        }
+                    }
+                    child.layout(childLeft, childTop, childLeft + width, childTop + height);
+                }
+
+                notifyHeightChanged();
+            }
+
+            @Override
+            public void requestLayout() {
+                if (ignoreLayout) {
+                    return;
+                }
+                super.requestLayout();
+            }
+        };
+        sizeNotifierFrameLayout.setDelegate(this);
+
+        fragmentView = sizeNotifierFrameLayout;
         fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
         FrameLayout frameLayout = (FrameLayout) fragmentView;
 
         listView = new RecyclerListView(context) {
             @Override
+            protected void requestChildOnScreen(View child, View focused) {
+                if (!(child instanceof PollEditTextCell)) {
+                    return;
+                }
+                super.requestChildOnScreen(child, focused);
+            }
+
+            @Override
             public boolean requestChildRectangleOnScreen(View child, Rect rectangle, boolean immediate) {
                 rectangle.bottom += AndroidUtilities.dp(60);
                 return super.requestChildRectangleOnScreen(child, rectangle, immediate);
             }
-
-            @Override
-            protected void onMeasure(int widthSpec, int heightSpec) {
-                super.onMeasure(widthSpec, heightSpec);
-            }
-
-            @Override
-            public void requestLayout() {
-                super.requestLayout();
-            }
         };
         listView.setVerticalScrollBarEnabled(false);
         ((DefaultItemAnimator) listView.getItemAnimator()).setDelayAnimations(false);
-        listView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
+        layoutManager = new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false);
+        listView.setLayoutManager(layoutManager);
         ItemTouchHelper itemTouchHelper = new ItemTouchHelper(new TouchHelperCallback());
         itemTouchHelper.attachToRecyclerView(listView);
         frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT));
@@ -213,12 +493,152 @@ public class PollCreateActivity extends BaseFragment {
         listView.setOnItemClickListener((view, position) -> {
             if (position == addAnswerRow) {
                 addNewField();
+            } else if (view instanceof TextCheckCell) {
+                TextCheckCell cell = (TextCheckCell) view;
+                boolean checked;
+                boolean wasChecksBefore = quizPoll;
+                if (suggestEmojiPanel != null) {
+                    suggestEmojiPanel.forceClose();
+                }
+                if (position == anonymousRow) {
+                    checked = anonymousPoll = !anonymousPoll;
+                } else if (position == multipleRow) {
+                    checked = multipleChoise = !multipleChoise;
+                    if (multipleChoise && quizPoll) {
+                        int prevSolutionRow = solutionRow;
+                        quizPoll = false;
+                        updateRows();
+                        RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(quizRow);
+                        if (holder != null) {
+                            ((TextCheckCell) holder.itemView).setChecked(false);
+                        } else {
+                            listAdapter.notifyItemChanged(quizRow);
+                        }
+                        listAdapter.notifyItemRangeRemoved(prevSolutionRow, 2);
+                    }
+                } else {
+                    if (quizOnly != 0) {
+                        return;
+                    }
+                    checked = quizPoll = !quizPoll;
+                    int prevSolutionRow = solutionRow;
+                    updateRows();
+                    if (quizPoll) {
+                        listAdapter.notifyItemRangeInserted(solutionRow, 2);
+                    } else {
+                        listAdapter.notifyItemRangeRemoved(prevSolutionRow, 2);
+                    }
+                    if (quizPoll && multipleChoise) {
+                        multipleChoise = false;
+                        RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(multipleRow);
+                        if (holder != null) {
+                            ((TextCheckCell) holder.itemView).setChecked(false);
+                        } else {
+                            listAdapter.notifyItemChanged(multipleRow);
+                        }
+                    }
+                    if (quizPoll) {
+                        boolean was = false;
+                        for (int a = 0; a < answersChecks.length; a++) {
+                            if (was) {
+                                answersChecks[a] = false;
+                            } else if (answersChecks[a]) {
+                                was = true;
+                            }
+                        }
+                    }
+                }
+                if (hintShowed && !quizPoll) {
+                    hintView.hide();
+                }
+                int count = listView.getChildCount();
+                for (int a = answerStartRow; a < answerStartRow + answersCount; a++) {
+                    RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(a);
+                    if (holder != null && holder.itemView instanceof PollEditTextCell) {
+                        PollEditTextCell pollEditTextCell = (PollEditTextCell) holder.itemView;
+                        pollEditTextCell.setShowCheckBox(quizPoll, true);
+                        pollEditTextCell.setChecked(answersChecks[a - answerStartRow], wasChecksBefore);
+                        if (pollEditTextCell.getTop() > AndroidUtilities.dp(40) && position == quizRow && !hintShowed) {
+                            hintView.showForView(pollEditTextCell.getCheckBox(), true);
+                            hintShowed = true;
+                        }
+                    }
+                }
+
+                cell.setChecked(checked);
+                checkDoneButton();
             }
         });
+        listView.setOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
+
+            }
+
+            @Override
+            public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
+                if (dy != 0 && hintView != null) {
+                    hintView.hide();
+                }
+                if (suggestEmojiPanel != null && suggestEmojiPanel.isShown()) {
+                    SuggestEmojiView.AnchorViewDelegate emojiDelegate = suggestEmojiPanel.getDelegate();
+                    if (emojiDelegate instanceof PollEditTextCell) {
+                        PollEditTextCell cell = (PollEditTextCell) emojiDelegate;
+                        RecyclerView.ViewHolder holder = listView.findContainingViewHolder(cell);
+                        if (holder != null) {
+                            if (suggestEmojiPanel.getDirection() == SuggestEmojiView.DIRECTION_TO_BOTTOM) {
+                                suggestEmojiPanel.setTranslationY(holder.itemView.getY() - AndroidUtilities.dp(166) + holder.itemView.getMeasuredHeight());
+                            } else {
+                                suggestEmojiPanel.setTranslationY(holder.itemView.getY());
+                            }
+                            if (!layoutManager.isViewPartiallyVisible(holder.itemView, true, true)) {
+                                suggestEmojiPanel.forceClose();
+                            }
+                        } else {
+                            suggestEmojiPanel.forceClose();
+                        }
+                    } else {
+                        suggestEmojiPanel.forceClose();
+                    }
+                }
+            }
+        });
+
+        hintView = new HintView(context, 4);
+        hintView.setText(LocaleController.getString(R.string.PollTapToSelect));
+        hintView.setAlpha(0.0f);
+        hintView.setVisibility(View.INVISIBLE);
+        frameLayout.addView(hintView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP, 19, 0, 19, 0));
+
+        if (isPremium) {
+            NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.emojiLoaded);
+            suggestEmojiPanel = new SuggestEmojiView(context, currentAccount, null, resourceProvider);
+            suggestEmojiPanel.forbidCopy();
+            suggestEmojiPanel.forbidSetAsStatus();
+            suggestEmojiPanel.setHorizontalPadding(AndroidUtilities.dp(24));
+            frameLayout.addView(suggestEmojiPanel, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 160, Gravity.LEFT | Gravity.TOP));
+        }
+        keyboardNotifier = new KeyboardNotifier(sizeNotifierFrameLayout, null);
 
         checkDoneButton();
 
         return fragmentView;
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        if (isPremium) {
+            hideEmojiPopup(false);
+            if (suggestEmojiPanel != null) {
+                suggestEmojiPanel.forceClose();
+            }
+            if (currentCell != null) {
+                currentCell.setEmojiButtonVisibility(false);
+                currentCell.getTextView().clearFocus();
+                hideKeyboard(currentCell.getEditField());
+            }
+        }
     }
 
     @Override
@@ -227,59 +647,79 @@ public class PollCreateActivity extends BaseFragment {
         if (listAdapter != null) {
             listAdapter.notifyDataSetChanged();
         }
+        AndroidUtilities.requestAdjustResize(getParentActivity(), classGuid);
     }
 
     @Override
-    protected void onTransitionAnimationEnd(boolean isOpen, boolean backward) {
-        if (isOpen) {
-            AndroidUtilities.runOnUIThread(() -> {
-                if (listView != null) {
-                    RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(questionRow);
-                    if (holder != null) {
-                        PollEditTextCell textCell = (PollEditTextCell) holder.itemView;
-                        EditTextBoldCursor editText = textCell.getTextView();
-                        editText.requestFocus();
-                        AndroidUtilities.showKeyboard(editText);
-                    }
-                }
-            }, 100);
+    public void onFragmentDestroy() {
+        super.onFragmentDestroy();
+        destroyed = true;
+        if (isPremium) {
+            NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.emojiLoaded);
+            if (emojiView != null) {
+                sizeNotifierFrameLayout.removeView(emojiView);
+            }
         }
     }
 
-    private String getFixedString(String text) {
-        if (TextUtils.isEmpty(text)) {
-            return text;
+    @Override
+    public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.emojiLoaded) {
+            if (emojiView != null) {
+                emojiView.invalidateViews();
+            }
+            if (currentCell != null) {
+                int color = currentCell.getEditField().getCurrentTextColor();
+                currentCell.getEditField().setTextColor(0xffffffff);
+                currentCell.getEditField().setTextColor(color);
+            }
         }
-        text = AndroidUtilities.getTrimmedString(text).toString();
-        while (text.contains("\n\n\n")) {
-            text = text.replace("\n\n\n", "\n\n");
+    }
+
+    private void showQuizHint() {
+        int count = listView.getChildCount();
+        for (int a = answerStartRow; a < answerStartRow + answersCount; a++) {
+            RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(a);
+            if (holder != null && holder.itemView instanceof PollEditTextCell) {
+                PollEditTextCell pollEditTextCell = (PollEditTextCell) holder.itemView;
+                if (pollEditTextCell.getTop() > AndroidUtilities.dp(40)) {
+                    hintView.showForView(pollEditTextCell.getCheckBox(), true);
+                    break;
+                }
+            }
         }
-        while (text.startsWith("\n\n\n")) {
-            text = text.replace("\n\n\n", "\n\n");
-        }
-        return text;
     }
 
     private void checkDoneButton() {
         boolean enabled = true;
-        if (TextUtils.isEmpty(getFixedString(questionString)) || questionString.length() > MAX_QUESTION_LENGTH) {
+        int checksCount = 0;
+        if (quizPoll) {
+            for (int a = 0; a < answersChecks.length; a++) {
+                if (!TextUtils.isEmpty(ChatAttachAlertPollLayout.getFixedString(answers[a])) && answersChecks[a]) {
+                    checksCount++;
+                }
+            }
+        }
+        if (!TextUtils.isEmpty(ChatAttachAlertPollLayout.getFixedString(solutionString)) && solutionString.length() > ChatAttachAlertPollLayout.MAX_SOLUTION_LENGTH) {
+            enabled = false;
+        } else if (TextUtils.isEmpty(ChatAttachAlertPollLayout.getFixedString(questionString)) || questionString.length() > ChatAttachAlertPollLayout.MAX_QUESTION_LENGTH) {
             enabled = false;
         } else {
             int count = 0;
             for (int a = 0; a < answers.length; a++) {
-                if (!TextUtils.isEmpty(getFixedString(answers[a]))) {
-                    if (answers[a].length() > MAX_ANSWER_LENGTH) {
+                if (!TextUtils.isEmpty(ChatAttachAlertPollLayout.getFixedString(answers[a]))) {
+                    if (answers[a].length() > ChatAttachAlertPollLayout.MAX_ANSWER_LENGTH) {
                         count = 0;
                         break;
                     }
                     count++;
                 }
             }
-            if (count < 2) {
+            if (count < 2 || quizPoll && checksCount < 1) {
                 enabled = false;
             }
         }
-        doneItem.setEnabled(enabled);
+        doneItem.setEnabled(quizPoll && checksCount == 0 || enabled);
         doneItem.setAlpha(enabled ? 1.0f : 0.5f);
     }
 
@@ -301,18 +741,47 @@ public class PollCreateActivity extends BaseFragment {
             addAnswerRow = -1;
         }
         answerSectionRow = rowCount++;
+        settingsHeaderRow = rowCount++;
+        TLRPC.Chat chat = parentFragment.getCurrentChat();
+        if (!ChatObject.isChannel(chat) || chat.megagroup) {
+            anonymousRow = rowCount++;
+        } else {
+            anonymousRow = -1;
+        }
+        if (quizOnly != 1) {
+            multipleRow = rowCount++;
+        } else {
+            multipleRow = -1;
+        }
+        if (quizOnly == 0) {
+            quizRow = rowCount++;
+        } else {
+            quizRow = -1;
+        }
+        settingsSectionRow = rowCount++;
+        if (quizPoll) {
+            solutionRow = rowCount++;
+            solutionInfoRow = rowCount++;
+        } else {
+            solutionRow = -1;
+            solutionInfoRow = -1;
+        }
     }
 
     @Override
     public boolean onBackPressed() {
+        if (emojiViewVisible) {
+            hideEmojiPopup(true);
+            return false;
+        }
         return checkDiscard();
     }
 
     private boolean checkDiscard() {
-        boolean allowDiscard = TextUtils.isEmpty(getFixedString(questionString));
+        boolean allowDiscard = TextUtils.isEmpty(ChatAttachAlertPollLayout.getFixedString(questionString));
         if (allowDiscard) {
             for (int a = 0; a < answersCount; a++) {
-                allowDiscard = TextUtils.isEmpty(getFixedString(answers[a]));
+                allowDiscard = TextUtils.isEmpty(ChatAttachAlertPollLayout.getFixedString(answers[a]));
                 if (!allowDiscard) {
                     break;
                 }
@@ -320,10 +789,10 @@ public class PollCreateActivity extends BaseFragment {
         }
         if (!allowDiscard) {
             AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-            builder.setTitle(LocaleController.getString("CancelPollAlertTitle", R.string.CancelPollAlertTitle));
-            builder.setMessage(LocaleController.getString("CancelPollAlertText", R.string.CancelPollAlertText));
-            builder.setPositiveButton(LocaleController.getString("OK", R.string.OK), (dialogInterface, i) -> finishFragment());
-            builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
+            builder.setTitle(LocaleController.getString(R.string.CancelPollAlertTitle));
+            builder.setMessage(LocaleController.getString(R.string.CancelPollAlertText));
+            builder.setPositiveButton(LocaleController.getString(R.string.PassportDiscard), (dialogInterface, i) -> finishFragment());
+            builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
             showDialog(builder.create());
         }
         return allowDiscard;
@@ -333,90 +802,40 @@ public class PollCreateActivity extends BaseFragment {
         delegate = pollCreateActivityDelegate;
     }
 
-    private void showEditDoneProgress(final boolean show) {
-        if (doneItemAnimation != null) {
-            doneItemAnimation.cancel();
-        }
-        doneItemAnimation = new AnimatorSet();
-        if (show) {
-            progressView.setVisibility(View.VISIBLE);
-            doneItem.setEnabled(false);
-            doneItemAnimation.playTogether(
-                    ObjectAnimator.ofFloat(doneItem.getImageView(), View.SCALE_X, 0.1f),
-                    ObjectAnimator.ofFloat(doneItem.getImageView(), View.SCALE_Y, 0.1f),
-                    ObjectAnimator.ofFloat(doneItem.getImageView(), View.ALPHA, 0.0f),
-                    ObjectAnimator.ofFloat(progressView, View.SCALE_X, 1.0f),
-                    ObjectAnimator.ofFloat(progressView, View.SCALE_Y, 1.0f),
-                    ObjectAnimator.ofFloat(progressView, View.ALPHA, 1.0f));
-        } else {
-            doneItem.getImageView().setVisibility(View.VISIBLE);
-            doneItem.setEnabled(true);
-            doneItemAnimation.playTogether(
-                    ObjectAnimator.ofFloat(progressView, View.SCALE_X, 0.1f),
-                    ObjectAnimator.ofFloat(progressView, View.SCALE_Y, 0.1f),
-                    ObjectAnimator.ofFloat(progressView, View.ALPHA, 0.0f),
-                    ObjectAnimator.ofFloat(doneItem.getImageView(), View.SCALE_X, 1.0f),
-                    ObjectAnimator.ofFloat(doneItem.getImageView(), View.SCALE_Y, 1.0f),
-                    ObjectAnimator.ofFloat(doneItem.getImageView(), View.ALPHA, 1.0f));
-        }
-        doneItemAnimation.addListener(new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(Animator animation) {
-                if (doneItemAnimation != null && doneItemAnimation.equals(animation)) {
-                    if (!show) {
-                        progressView.setVisibility(View.INVISIBLE);
-                    } else {
-                        doneItem.getImageView().setVisibility(View.INVISIBLE);
-                    }
-                }
-            }
-
-            @Override
-            public void onAnimationCancel(Animator animation) {
-                if (doneItemAnimation != null && doneItemAnimation.equals(animation)) {
-                    doneItemAnimation = null;
-                }
-            }
-        });
-        doneItemAnimation.setDuration(150);
-        doneItemAnimation.start();
-    }
-
     private void setTextLeft(View cell, int index) {
-        if (cell instanceof HeaderCell) {
-            HeaderCell headerCell = (HeaderCell) cell;
-            if (index == -1) {
-                int left = MAX_QUESTION_LENGTH - (questionString != null ? questionString.length() : 0);
-                if (left <= MAX_QUESTION_LENGTH - MAX_QUESTION_LENGTH * 0.7f) {
-                    headerCell.setText2(String.format("%d", left));
-                    SimpleTextView textView = headerCell.getTextView2();
-                    String key = left < 0 ? Theme.key_windowBackgroundWhiteRedText5 : Theme.key_windowBackgroundWhiteGrayText3;
-                    textView.setTextColor(Theme.getColor(key));
-                    textView.setTag(key);
-                } else {
-                    headerCell.setText2("");
-                }
-            } else {
-                headerCell.setText2("");
-            }
-        } else if (cell instanceof PollEditTextCell) {
-            if (index >= 0) {
-                PollEditTextCell textCell = (PollEditTextCell) cell;
-                int left = MAX_ANSWER_LENGTH - (answers[index] != null ? answers[index].length() : 0);
-                if (left <= MAX_ANSWER_LENGTH - MAX_ANSWER_LENGTH * 0.7f) {
-                    textCell.setText2(String.format("%d", left));
-                    SimpleTextView textView = textCell.getTextView2();
-                    String key = left < 0 ? Theme.key_windowBackgroundWhiteRedText5 : Theme.key_windowBackgroundWhiteGrayText3;
-                    textView.setTextColor(Theme.getColor(key));
-                    textView.setTag(key);
-                } else {
-                    textCell.setText2("");
-                }
-            }
+        if (!(cell instanceof PollEditTextCell)) {
+            return;
+        }
+        PollEditTextCell textCell = (PollEditTextCell) cell;
+        int max;
+        int left;
+        if (index == questionRow) {
+            max = ChatAttachAlertPollLayout.MAX_QUESTION_LENGTH;
+            left = ChatAttachAlertPollLayout.MAX_QUESTION_LENGTH - (questionString != null ? questionString.length() : 0);
+        } else if (index == solutionRow) {
+            max = ChatAttachAlertPollLayout.MAX_SOLUTION_LENGTH;
+            left = ChatAttachAlertPollLayout.MAX_SOLUTION_LENGTH - (solutionString != null ? solutionString.length() : 0);
+        } else if (index >= answerStartRow && index < answerStartRow + answersCount) {
+            index -= answerStartRow;
+            max = ChatAttachAlertPollLayout.MAX_ANSWER_LENGTH;
+            left = ChatAttachAlertPollLayout.MAX_ANSWER_LENGTH - (answers[index] != null ? answers[index].length() : 0);
+        } else {
+            return;
+        }
+        if (left <= max - max * 0.7f) {
+            textCell.setText2(String.format("%d", left));
+            SimpleTextView textView = textCell.getTextView2();
+            int key = left < 0 ? Theme.key_text_RedRegular : Theme.key_windowBackgroundWhiteGrayText3;
+            textView.setTextColor(Theme.getColor(key));
+            textView.setTag(key);
+        } else {
+            textCell.setText2("");
         }
     }
 
     private void addNewField() {
+        resetSuggestEmojiPanel();
+        answersChecks[answersCount] = false;
         answersCount++;
         if (answersCount == answers.length) {
             listAdapter.notifyItemRemoved(addAnswerRow);
@@ -425,6 +844,424 @@ public class PollCreateActivity extends BaseFragment {
         updateRows();
         requestFieldFocusAtPosition = answerStartRow + answersCount - 1;
         listAdapter.notifyItemChanged(answerSectionRow);
+    }
+
+    private void updateSuggestEmojiPanelDelegate(RecyclerView.ViewHolder holder) {
+        if (suggestEmojiPanel != null ) {
+            suggestEmojiPanel.forceClose();
+            if (suggestEmojiPanel != null && holder != null && holder.itemView instanceof PollEditTextCell && suggestEmojiPanel.getDelegate() != holder.itemView) {
+                suggestEmojiPanel.setDelegate((PollEditTextCell) holder.itemView);
+            }
+        }
+    }
+
+    private void resetSuggestEmojiPanel() {
+        if (suggestEmojiPanel != null) {
+            suggestEmojiPanel.setDelegate(null);
+            suggestEmojiPanel.forceClose();
+        }
+    }
+
+    @Override
+    public void onSizeChanged(int height, boolean isWidthGreater) {
+        if (!isPremium) {
+            return;
+        }
+        if (height > dp(50) && keyboardVisible && !AndroidUtilities.isInMultiwindow && !AndroidUtilities.isTablet()) {
+            if (isWidthGreater) {
+                keyboardHeightLand = height;
+                MessagesController.getGlobalEmojiSettings().edit().putInt("kbd_height_land3", keyboardHeightLand).commit();
+            } else {
+                keyboardHeight = height;
+                MessagesController.getGlobalEmojiSettings().edit().putInt("kbd_height", keyboardHeight).commit();
+            }
+        }
+
+        if (emojiViewVisible) {
+            int newHeight = (isWidthGreater ? keyboardHeightLand : keyboardHeight);
+            if (isEmojiSearchOpened) {
+                newHeight += AndroidUtilities.dp(120);
+            }
+
+            FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) emojiView.getLayoutParams();
+            if (layoutParams.width != AndroidUtilities.displaySize.x || layoutParams.height != newHeight || wasEmojiSearchOpened != isEmojiSearchOpened) {
+                layoutParams.width = AndroidUtilities.displaySize.x;
+                layoutParams.height = newHeight;
+                emojiView.setLayoutParams(layoutParams);
+                emojiPadding = layoutParams.height;
+                keyboardNotifier.fire();
+                sizeNotifierFrameLayout.requestLayout();
+                if (wasEmojiSearchOpened != isEmojiSearchOpened) {
+                    animateEmojiViewTranslationY(wasEmojiSearchOpened ? -AndroidUtilities.dp(120) : AndroidUtilities.dp(120), 0);
+                }
+                wasEmojiSearchOpened = isEmojiSearchOpened;
+            }
+        }
+
+        if (lastSizeChangeValue1 == height && lastSizeChangeValue2 == isWidthGreater) {
+            return;
+        }
+        lastSizeChangeValue1 = height;
+        lastSizeChangeValue2 = isWidthGreater;
+
+        boolean oldValue = keyboardVisible;
+        if (currentCell != null) {
+            final EditTextBoldCursor editText = currentCell.getEditField();
+            keyboardVisible = editText.isFocused() && keyboardNotifier.keyboardVisible() && height > 0;
+        } else {
+            keyboardVisible = false;
+        }
+
+        if (keyboardVisible && emojiViewVisible) {
+            showEmojiPopup(0);
+        }
+
+        if (emojiPadding != 0 && !keyboardVisible && keyboardVisible != oldValue && !emojiViewVisible) {
+            emojiPadding = 0;
+            keyboardNotifier.fire();
+            sizeNotifierFrameLayout.requestLayout();
+        }
+
+        if (keyboardVisible && waitingForKeyboardOpen) {
+            waitingForKeyboardOpen = false;
+            AndroidUtilities.cancelRunOnUIThread(openKeyboardRunnable);
+        }
+    }
+
+    private void animateEmojiViewTranslationY(float fromY, float toY) {
+        ValueAnimator animator = ValueAnimator.ofFloat(0, 1f);
+        animator.addUpdateListener(animation -> {
+            float v = (float) animation.getAnimatedValue();
+            emojiView.setTranslationY(AndroidUtilities.lerp(fromY, toY, v));
+        });
+        animator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                emojiView.setTranslationY(toY);
+            }
+        });
+        animator.setDuration(AdjustPanLayoutHelper.keyboardDuration);
+        animator.setInterpolator(AdjustPanLayoutHelper.keyboardInterpolator);
+        animator.start();
+    }
+
+    public boolean isWaitingForKeyboardOpen() {
+        return waitingForKeyboardOpen;
+    }
+
+    private void onEmojiClicked(PollEditTextCell cell) {
+        this.currentCell = cell;
+        if (emojiViewVisible) {
+            collapseSearchEmojiView();
+            openKeyboardInternal();
+        } else {
+            showEmojiPopup(1);
+        }
+    }
+
+    private void collapseSearchEmojiView() {
+        if (isEmojiSearchOpened) {
+            emojiView.closeSearch(false);
+            FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) emojiView.getLayoutParams();
+            layoutParams.height -= AndroidUtilities.dp(120);
+            emojiView.setLayoutParams(layoutParams);
+            emojiPadding = layoutParams.height;
+            wasEmojiSearchOpened = isEmojiSearchOpened;
+            isEmojiSearchOpened = false;
+            animateEmojiViewTranslationY(-AndroidUtilities.dp(120), 0);
+        }
+    }
+
+    private void openKeyboardInternal() {
+        keyboardNotifier.awaitKeyboard();
+        final EditTextBoldCursor editText = currentCell.getEditField();
+        editText.requestFocus();
+        AndroidUtilities.showKeyboard(editText);
+        showEmojiPopup(AndroidUtilities.usingHardwareInput ? 0 : 2);
+
+        if (!AndroidUtilities.usingHardwareInput && !keyboardVisible && !AndroidUtilities.isInMultiwindow && !AndroidUtilities.isTablet()) {
+            waitingForKeyboardOpen = true;
+            AndroidUtilities.cancelRunOnUIThread(openKeyboardRunnable);
+            AndroidUtilities.runOnUIThread(openKeyboardRunnable, 100);
+        }
+    }
+
+    private void showEmojiPopup(int show) {
+        if (!isPremium) {
+            return;
+        }
+
+        if (show == 1) {
+            boolean emojiWasVisible = emojiView != null && emojiView.getVisibility() == View.VISIBLE;
+            createEmojiView();
+
+            emojiView.setVisibility(View.VISIBLE);
+            emojiViewWasVisible = emojiViewVisible;
+            emojiViewVisible = true;
+            View currentView = emojiView;
+
+            if (keyboardHeight <= 0) {
+                if (AndroidUtilities.isTablet()) {
+                    keyboardHeight = dp(150);
+                } else {
+                    keyboardHeight = MessagesController.getGlobalEmojiSettings().getInt("kbd_height", dp(200));
+                }
+            }
+            if (keyboardHeightLand <= 0) {
+                if (AndroidUtilities.isTablet()) {
+                    keyboardHeightLand = dp(150);
+                } else {
+                    keyboardHeightLand = MessagesController.getGlobalEmojiSettings().getInt("kbd_height_land3", dp(200));
+                }
+            }
+            int currentHeight = (AndroidUtilities.displaySize.x > AndroidUtilities.displaySize.y ? keyboardHeightLand : keyboardHeight);
+
+            FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) currentView.getLayoutParams();
+            layoutParams.height = currentHeight;
+            currentView.setLayoutParams(layoutParams);
+            if (!AndroidUtilities.isInMultiwindow && !AndroidUtilities.isTablet() && currentCell != null) {
+                AndroidUtilities.hideKeyboard(currentCell.getEditField());
+            }
+
+            emojiPadding = currentHeight;
+            keyboardNotifier.fire();
+            sizeNotifierFrameLayout.requestLayout();
+
+            ChatActivityEnterViewAnimatedIconView emojiButton = currentCell.getEmojiButton();
+            if (emojiButton != null) {
+                emojiButton.setState(ChatActivityEnterViewAnimatedIconView.State.KEYBOARD, true);
+            }
+            if (!emojiWasVisible && !keyboardVisible) {
+                ValueAnimator animator = ValueAnimator.ofFloat(emojiPadding, 0);
+                animator.addUpdateListener(animation -> {
+                    float v = (float) animation.getAnimatedValue();
+                    emojiView.setTranslationY(v);
+                });
+                animator.addListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        emojiView.setTranslationY(0);
+                    }
+                });
+                animator.setDuration(AdjustPanLayoutHelper.keyboardDuration);
+                animator.setInterpolator(AdjustPanLayoutHelper.keyboardInterpolator);
+                animator.start();
+            }
+        } else {
+            ChatActivityEnterViewAnimatedIconView emojiButton = currentCell.getEmojiButton();
+            if (emojiButton != null) {
+                emojiButton.setState(ChatActivityEnterViewAnimatedIconView.State.SMILE, true);
+            }
+            if (emojiView != null) {
+                emojiViewWasVisible = emojiViewVisible;
+                emojiViewVisible = false;
+                isEmojiSearchOpened = false;
+                if (AndroidUtilities.usingHardwareInput || AndroidUtilities.isInMultiwindow) {
+                    emojiView.setVisibility(View.GONE);
+                }
+            }
+            if (show == 0) {
+                emojiPadding = 0;
+            }
+            keyboardNotifier.fire();
+            sizeNotifierFrameLayout.requestLayout();
+        }
+    }
+
+    private void onCellFocusChanges(PollEditTextCell cell, boolean focused) {
+        if (isPremium && focused) {
+            if (currentCell == cell && emojiViewVisible && isEmojiSearchOpened) {
+                collapseSearchEmojiView();
+                emojiViewVisible = false;
+            }
+            PollEditTextCell prevCell = currentCell;
+            currentCell = cell;
+            cell.setEmojiButtonVisibility(true);
+            cell.getEmojiButton().setState(ChatActivityEnterViewAnimatedIconView.State.SMILE, false);
+            updateSuggestEmojiPanelDelegate(listView.findContainingViewHolder(cell));
+            if (prevCell != null && prevCell != cell) {
+                if (emojiViewVisible) {
+                    collapseSearchEmojiView();
+                    hideEmojiPopup(false);
+                    openKeyboardInternal();
+                }
+                prevCell.setEmojiButtonVisibility(false);
+                prevCell.getEmojiButton().setState(ChatActivityEnterViewAnimatedIconView.State.SMILE, false);
+            }
+        }
+    }
+
+    private void hideEmojiPopup(boolean byBackButton) {
+        if (!isPremium) {
+            return;
+        }
+        if (emojiViewVisible) {
+            emojiView.scrollEmojiToTop();
+            emojiView.closeSearch(false);
+            if (byBackButton) {
+                emojiView.hideSearchKeyboard();
+            }
+            isEmojiSearchOpened = false;
+            showEmojiPopup(0);
+        }
+        if (byBackButton) {
+            if (emojiView != null && emojiView.getVisibility() == View.VISIBLE) {
+                int height = emojiView.getMeasuredHeight();
+                ValueAnimator animator = ValueAnimator.ofFloat(0, height);
+                animator.addUpdateListener(animation -> {
+                    float v = (float) animation.getAnimatedValue();
+                    emojiView.setTranslationY(v);
+                });
+                isAnimatePopupClosing = true;
+                animator.addListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        isAnimatePopupClosing = false;
+                        emojiView.setTranslationY(0);
+                        hideEmojiView();
+                    }
+                });
+                animator.setDuration(AdjustPanLayoutHelper.keyboardDuration);
+                animator.setInterpolator(AdjustPanLayoutHelper.keyboardInterpolator);
+                animator.start();
+            } else {
+                hideEmojiView();
+            }
+        }
+    }
+
+    public void hideEmojiView() {
+        if (!emojiViewVisible && emojiView != null && emojiView.getVisibility() != View.GONE) {
+            if (currentCell != null) {
+                ChatActivityEnterViewAnimatedIconView emojiButton = currentCell.getEmojiButton();
+                if (emojiButton != null) {
+                    emojiButton.setState(ChatActivityEnterViewAnimatedIconView.State.SMILE, false);
+                }
+            }
+            emojiView.setVisibility(View.GONE);
+        }
+        int wasEmojiPadding = emojiPadding;
+        emojiPadding = 0;
+        if (wasEmojiPadding != emojiPadding) {
+            keyboardNotifier.fire();
+        }
+    }
+
+    public boolean isAnimatePopupClosing() {
+        return isAnimatePopupClosing;
+    }
+
+    public boolean isPopupShowing() {
+        return emojiViewVisible;
+    }
+
+    public boolean isPopupVisible() {
+        return emojiView != null && emojiView.getVisibility() == View.VISIBLE;
+    }
+
+    public int getEmojiPadding() {
+        return emojiPadding;
+    }
+
+
+    boolean wasEmojiSearchOpened;
+    boolean isEmojiSearchOpened;
+    private void createEmojiView() {
+        if (emojiView != null && emojiView.currentAccount != UserConfig.selectedAccount) {
+            sizeNotifierFrameLayout.removeView(emojiView);
+            emojiView = null;
+        }
+        if (emojiView != null) {
+            return;
+        }
+        emojiView = new EmojiView(null, true, false, false, getContext(), true, null, null, true, resourceProvider, false);
+        emojiView.fixBottomTabContainerTranslation = false;
+        emojiView.allowEmojisForNonPremium(false);
+        emojiView.setVisibility(View.GONE);
+        if (AndroidUtilities.isTablet()) {
+            emojiView.setForseMultiwindowLayout(true);
+        }
+        emojiView.setDelegate(new EmojiView.EmojiViewDelegate() {
+            @Override
+            public boolean onBackspace() {
+                final EditTextBoldCursor editText = currentCell.getEditField();
+                if (editText == null) {
+                    return false;
+                }
+                editText.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
+                return true;
+            }
+
+            @Override
+            public void onEmojiSelected(String symbol) {
+                final EditTextBoldCursor editText = currentCell.getEditField();
+                if (editText == null) {
+                    return;
+                }
+                int i = editText.getSelectionEnd();
+                if (i < 0) {
+                    i = 0;
+                }
+                try {
+                    CharSequence localCharSequence = Emoji.replaceEmoji(symbol, editText.getPaint().getFontMetricsInt(), false);
+                    editText.setText(editText.getText().insert(i, localCharSequence));
+                    int j = i + localCharSequence.length();
+                    editText.setSelection(j, j);
+                } catch (Exception e) {
+                    FileLog.e(e);
+                }
+            }
+
+            @Override
+            public void onCustomEmojiSelected(long documentId, TLRPC.Document document, String emoticon, boolean isRecent) {
+                final EditTextBoldCursor editText = currentCell.getEditField();
+                if (editText == null) {
+                    return;
+                }
+                int i = editText.getSelectionEnd();
+                if (i < 0) {
+                    i = 0;
+                }
+                try {
+                    SpannableString spannable = new SpannableString(emoticon);
+                    AnimatedEmojiSpan span;
+                    if (document != null) {
+                        span = new AnimatedEmojiSpan(document, editText.getPaint().getFontMetricsInt());
+                    } else {
+                        span = new AnimatedEmojiSpan(documentId, editText.getPaint().getFontMetricsInt());
+                    }
+                    span.cacheType = emojiView.emojiCacheType;
+                    spannable.setSpan(span, 0, spannable.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    editText.setText(editText.getText().insert(i, spannable));
+                    int j = i + spannable.length();
+                    editText.setSelection(j, j);
+                } catch (Exception e) {
+                    FileLog.e(e);
+                }
+            }
+
+            @Override
+            public void onClearEmojiRecent() {
+                AlertDialog.Builder builder = new AlertDialog.Builder(getContext(), resourceProvider);
+                builder.setTitle(LocaleController.getString(R.string.ClearRecentEmojiTitle));
+                builder.setMessage(LocaleController.getString(R.string.ClearRecentEmojiText));
+                builder.setPositiveButton(LocaleController.getString(R.string.ClearButton), (dialogInterface, i) -> emojiView.clearRecentEmoji());
+                builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+                builder.show();
+            }
+
+            @Override
+            public void onSearchOpenClose(int type) {
+                isEmojiSearchOpened = type != 0;
+                sizeNotifierFrameLayout.requestLayout();
+            }
+
+            @Override
+            public boolean isSearchOpened() {
+                return isEmojiSearchOpened;
+            }
+        });
+        sizeNotifierFrameLayout.addView(emojiView);
     }
 
     private class ListAdapter extends RecyclerListView.SelectionAdapter {
@@ -446,66 +1283,120 @@ public class PollCreateActivity extends BaseFragment {
                 case 0: {
                     HeaderCell cell = (HeaderCell) holder.itemView;
                     if (position == questionHeaderRow) {
-                        cell.setText(LocaleController.getString("Question", R.string.Question));
+                        cell.setText(LocaleController.getString(R.string.PollQuestion));
                     } else if (position == answerHeaderRow) {
-                        cell.setText(LocaleController.getString("PollOptions", R.string.PollOptions));
+                        if (quizOnly == 1) {
+                            cell.setText(LocaleController.getString(R.string.QuizAnswers));
+                        } else {
+                            cell.setText(LocaleController.getString(R.string.AnswerOptions));
+                        }
+                    } else if (position == settingsHeaderRow) {
+                        cell.setText(LocaleController.getString(R.string.Settings));
                     }
                     break;
                 }
                 case 2: {
                     TextInfoPrivacyCell cell = (TextInfoPrivacyCell) holder.itemView;
-                    cell.setBackgroundDrawable(Theme.getThemedDrawable(mContext, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
-                    if (10 - answersCount <= 0) {
-                        cell.setText(LocaleController.getString("AddAnOptionInfoMax", R.string.AddAnOptionInfoMax));
+                    cell.setFixedSize(0);
+                    cell.setBackgroundDrawable(Theme.getThemedDrawableByKey(mContext, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                    if (position == solutionInfoRow) {
+                        cell.setText(LocaleController.getString(R.string.AddAnExplanationInfo));
+                    } else if (position == settingsSectionRow) {
+                        if (quizOnly != 0) {
+                            cell.setFixedSize(12);
+                            cell.setText(null);
+                        } else {
+                            cell.setText(LocaleController.getString(R.string.QuizInfo));
+                        }
+                    } else if (10 - answersCount <= 0) {
+                        cell.setText(LocaleController.getString(R.string.AddAnOptionInfoMax));
                     } else {
                         cell.setText(LocaleController.formatString("AddAnOptionInfo", R.string.AddAnOptionInfo, LocaleController.formatPluralString("Option", 10 - answersCount)));
                     }
                     break;
                 }
                 case 3: {
-                    TextSettingsCell textCell = (TextSettingsCell) holder.itemView;
-                    textCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText));
-                    textCell.setText(LocaleController.getString("AddAnOption", R.string.AddAnOption), false);
+                    TextCell textCell = (TextCell) holder.itemView;
+                    textCell.setColors(-1, Theme.key_windowBackgroundWhiteBlueText4);
+                    Drawable drawable1 = mContext.getResources().getDrawable(R.drawable.poll_add_circle);
+                    Drawable drawable2 = mContext.getResources().getDrawable(R.drawable.poll_add_plus);
+                    drawable1.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_switchTrackChecked), PorterDuff.Mode.MULTIPLY));
+                    drawable2.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_checkboxCheck), PorterDuff.Mode.MULTIPLY));
+                    CombinedDrawable combinedDrawable = new CombinedDrawable(drawable1, drawable2);
+                    textCell.setTextAndIcon(LocaleController.getString(R.string.AddAnOption), combinedDrawable, false);
                     break;
                 }
-                case 4: {
-                    PollEditTextCell textCell = (PollEditTextCell) holder.itemView;
-                    textCell.setTag(1);
-                    textCell.setTextAndHint(questionString != null ? questionString : "", LocaleController.getString("QuestionHint", R.string.QuestionHint), false);
-                    textCell.setTag(null);
-                    break;
-                }
-                case 5: {
-                    PollEditTextCell textCell = (PollEditTextCell) holder.itemView;
-                    textCell.setTag(1);
-                    int index = position - answerStartRow;
-                    textCell.setTextAndHint(answers[index], LocaleController.getString("OptionHint", R.string.OptionHint), true);
-                    textCell.setTag(null);
-                    if (requestFieldFocusAtPosition == position) {
-                        EditTextBoldCursor editText = textCell.getTextView();
-                        editText.requestFocus();
-                        AndroidUtilities.showKeyboard(editText);
-                        requestFieldFocusAtPosition = -1;
+                case 6: {
+                    TextCheckCell checkCell = (TextCheckCell) holder.itemView;
+                    if (position == anonymousRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.PollAnonymous), anonymousPoll, multipleRow != -1 || quizRow != -1);
+                        checkCell.setEnabled(true, null);
+                    } else if (position == multipleRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.PollMultiple), multipleChoise, quizRow != -1);
+                        checkCell.setEnabled(true, null);
+                    } else if (position == quizRow) {
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.PollQuiz), quizPoll, false);
+                        checkCell.setEnabled(quizOnly == 0, null);
                     }
-                    setTextLeft(holder.itemView, position - answerStartRow);
-                    break;
                 }
             }
         }
 
         @Override
         public void onViewAttachedToWindow(RecyclerView.ViewHolder holder) {
-            switch (holder.getItemViewType()) {
-                case 0: {
-                    setTextLeft(holder.itemView, holder.getAdapterPosition() == questionHeaderRow ? -1 : 0);
-                    break;
+            int viewType = holder.getItemViewType();
+            if (viewType == 4) {
+                PollEditTextCell textCell = (PollEditTextCell) holder.itemView;
+                textCell.setTag(1);
+                textCell.setTextAndHint(questionString != null ? questionString : "", LocaleController.getString(R.string.QuestionHint), false);
+                textCell.setTag(null);
+                setTextLeft(holder.itemView, holder.getAdapterPosition());
+            } else if (viewType == 5) {
+                int position = holder.getAdapterPosition();
+                PollEditTextCell textCell = (PollEditTextCell) holder.itemView;
+                textCell.setTag(1);
+                int index = position - answerStartRow;
+                textCell.setTextAndHint(answers[index], LocaleController.getString(R.string.OptionHint), true);
+                textCell.setTag(null);
+                if (requestFieldFocusAtPosition == position) {
+                    EditTextBoldCursor editText = textCell.getTextView();
+                    editText.requestFocus();
+                    AndroidUtilities.showKeyboard(editText);
+                    requestFieldFocusAtPosition = -1;
+                }
+                setTextLeft(holder.itemView, position);
+            } else if (viewType == 7) {
+                PollEditTextCell textCell = (PollEditTextCell) holder.itemView;
+                textCell.setTag(1);
+                textCell.setTextAndHint(solutionString != null ? solutionString : "", LocaleController.getString(R.string.AddAnExplanation), false);
+                textCell.setTag(null);
+                setTextLeft(holder.itemView, holder.getAdapterPosition());
+            }
+        }
+
+        @Override
+        public void onViewDetachedFromWindow(RecyclerView.ViewHolder holder) {
+            if (holder.getItemViewType() == 4 || holder.getItemViewType() == 5) {
+                PollEditTextCell editTextCell = (PollEditTextCell) holder.itemView;
+                EditTextBoldCursor editText = editTextCell.getTextView();
+                if (editText.isFocused()) {
+                    if (isPremium) {
+                        if (suggestEmojiPanel != null) {
+                            suggestEmojiPanel.forceClose();
+                        }
+                        hideEmojiPopup(true);
+                    }
+                    currentCell = null;
+                    editText.clearFocus();
+                    AndroidUtilities.hideKeyboard(editText);
                 }
             }
         }
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return holder.getAdapterPosition() == addAnswerRow;
+            int position = holder.getAdapterPosition();
+            return position == addAnswerRow || position == anonymousRow || position == multipleRow || quizOnly == 0 && position == quizRow;
         }
 
         @Override
@@ -513,7 +1404,7 @@ public class PollCreateActivity extends BaseFragment {
             View view;
             switch (viewType) {
                 case 0:
-                    view = new HeaderCell(mContext, false, 21, 15, true);
+                    view = new HeaderCell(mContext, Theme.key_windowBackgroundWhiteBlueHeader, 21, 15, false);
                     view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     break;
                 case 1:
@@ -523,11 +1414,34 @@ public class PollCreateActivity extends BaseFragment {
                     view = new TextInfoPrivacyCell(mContext);
                     break;
                 case 3:
-                    view = new TextSettingsCell(mContext);
+                    view = new TextCell(mContext);
                     view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     break;
                 case 4: {
-                    PollEditTextCell cell = new PollEditTextCell(mContext, null);
+                    PollEditTextCell cell = new PollEditTextCell(mContext, false, isPremium ? PollEditTextCell.TYPE_EMOJI : PollEditTextCell.TYPE_DEFAULT, null) {
+                        @Override
+                        protected void onActionModeStart(EditTextBoldCursor editText, ActionMode actionMode) {
+                            if (editText.isFocused() && editText.hasSelection()) {
+                                Menu menu = actionMode.getMenu();
+                                if (menu.findItem(android.R.id.copy) == null) {
+                                    return;
+                                }
+                                ChatActivity.fillActionModeMenu(menu, parentFragment.getCurrentEncryptedChat(), false);
+                            }
+                        }
+
+                        @Override
+                        protected void onEditTextFocusChanged(boolean focused) {
+                            onCellFocusChanges(this, focused);
+                        }
+
+
+                        @Override
+                        protected void onEmojiButtonClicked(PollEditTextCell cell1) {
+                            onEmojiClicked(cell1);
+                        }
+                    };
+                    cell.createErrorTextView();
                     cell.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     cell.addTextWatcher(new TextWatcher() {
                         @Override
@@ -545,10 +1459,94 @@ public class PollCreateActivity extends BaseFragment {
                             if (cell.getTag() != null) {
                                 return;
                             }
-                            questionString = s.toString();
-                            RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(questionHeaderRow);
+                            RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(questionRow);
                             if (holder != null) {
-                                setTextLeft(holder.itemView, -1);
+                                if (suggestEmojiPanel != null) {
+                                    ImageSpan[] spans = s.getSpans(0, s.length(), ImageSpan.class);
+                                    for (ImageSpan span : spans) {
+                                        s.removeSpan(span);
+                                    }
+                                    Emoji.replaceEmoji(s, cell.getEditField().getPaint().getFontMetricsInt(), false);
+
+                                    suggestEmojiPanel.setDirection(SuggestEmojiView.DIRECTION_TO_TOP);
+                                    suggestEmojiPanel.setDelegate(cell);
+                                    suggestEmojiPanel.setTranslationY(holder.itemView.getY());
+                                    suggestEmojiPanel.fireUpdate();
+                                }
+                            }
+                            questionString = s;
+                            if (holder != null) {
+                                setTextLeft(holder.itemView, questionRow);
+                            }
+                            checkDoneButton();
+                        }
+                    });
+                    view = cell;
+                    break;
+                }
+                case 6:
+                    view = new TextCheckCell(mContext);
+                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    break;
+                case 7: {
+                    PollEditTextCell cell = new PollEditTextCell(mContext, false, isPremium ? PollEditTextCell.TYPE_EMOJI : PollEditTextCell.TYPE_DEFAULT, null) {
+                        @Override
+                        protected void onActionModeStart(EditTextBoldCursor editText, ActionMode actionMode) {
+                            if (editText.isFocused() && editText.hasSelection()) {
+                                Menu menu = actionMode.getMenu();
+                                if (menu.findItem(android.R.id.copy) == null) {
+                                    return;
+                                }
+                                ChatActivity.fillActionModeMenu(menu, parentFragment.getCurrentEncryptedChat(), false);
+                            }
+                        }
+
+                        @Override
+                        protected void onEmojiButtonClicked(PollEditTextCell cell1) {
+                            onEmojiClicked(cell1);
+                        }
+
+                        @Override
+                        protected void onEditTextFocusChanged(boolean focused) {
+                            onCellFocusChanges(this, focused);
+                        }
+                    };
+                    cell.createErrorTextView();
+                    cell.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    cell.addTextWatcher(new TextWatcher() {
+                        @Override
+                        public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+
+                        }
+
+                        @Override
+                        public void onTextChanged(CharSequence s, int start, int before, int count) {
+
+                        }
+
+                        @Override
+                        public void afterTextChanged(Editable s) {
+                            if (cell.getTag() != null) {
+                                return;
+                            }
+                            RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(questionRow);
+                            if (holder != null) {
+                                if (suggestEmojiPanel != null) {
+                                    ImageSpan[] spans = s.getSpans(0, s.length(), ImageSpan.class);
+                                    for (ImageSpan span : spans) {
+                                        s.removeSpan(span);
+                                    }
+                                    Emoji.replaceEmoji(s, cell.getEditField().getPaint().getFontMetricsInt(), false);
+
+                                    suggestEmojiPanel.setDirection(SuggestEmojiView.DIRECTION_TO_TOP);
+                                    suggestEmojiPanel.setDelegate(cell);
+                                    suggestEmojiPanel.setTranslationY(holder.itemView.getY());
+                                    suggestEmojiPanel.fireUpdate();
+                                }
+                            }
+                            solutionString = s;
+                            if (holder != null) {
+                                setTextLeft(holder.itemView, solutionRow);
                             }
                             checkDoneButton();
                         }
@@ -557,32 +1555,53 @@ public class PollCreateActivity extends BaseFragment {
                     break;
                 }
                 default: {
-                    PollEditTextCell cell = new PollEditTextCell(mContext, v -> {
+                    PollEditTextCell cell = new PollEditTextCell(mContext, false, isPremium ? PollEditTextCell.TYPE_EMOJI : PollEditTextCell.TYPE_DEFAULT, v -> {
                         if (v.getTag() != null) {
                             return;
                         }
                         v.setTag(1);
-                        RecyclerView.ViewHolder holder = listView.findContainingViewHolder((View) v.getParent());
+                        PollEditTextCell p = (PollEditTextCell) v.getParent();
+                        RecyclerView.ViewHolder holder = listView.findContainingViewHolder(p);
                         if (holder != null) {
                             int position = holder.getAdapterPosition();
-                            int index = position - answerStartRow;
-                            listAdapter.notifyItemRemoved(holder.getAdapterPosition());
-                            System.arraycopy(answers, index + 1, answers, index, answers.length - 1 - index);
-                            answers[answers.length - 1] = null;
-                            answersCount--;
-                            if (answersCount == answers.length - 1) {
-                                listAdapter.notifyItemInserted(answerStartRow + answers.length - 1);
+                            if (position != RecyclerView.NO_POSITION) {
+                                int index = position - answerStartRow;
+                                listAdapter.notifyItemRemoved(position);
+                                System.arraycopy(answers, index + 1, answers, index, answers.length - 1 - index);
+                                System.arraycopy(answersChecks, index + 1, answersChecks, index, answersChecks.length - 1 - index);
+                                answers[answers.length - 1] = null;
+                                answersChecks[answersChecks.length - 1] = false;
+                                answersCount--;
+                                if (answersCount == answers.length - 1) {
+                                    listAdapter.notifyItemInserted(answerStartRow + answers.length - 1);
+                                }
+                                holder = listView.findViewHolderForAdapterPosition(position - 1);
+                                EditTextBoldCursor editText = p.getTextView();
+                                if (holder != null && holder.itemView instanceof PollEditTextCell) {
+                                    PollEditTextCell editTextCell = (PollEditTextCell) holder.itemView;
+                                    editTextCell.getTextView().requestFocus();
+                                } else if (editText.isFocused()) {
+                                    AndroidUtilities.hideKeyboard(editText);
+                                    hideEmojiPopup(true);
+                                } else if (isEmojiSearchOpened) {
+                                    hideEmojiPopup(true);
+                                }
+                                editText.clearFocus();
+                                checkDoneButton();
+                                updateRows();
+                                if (suggestEmojiPanel != null) {
+                                    suggestEmojiPanel.forceClose();
+                                    suggestEmojiPanel.setDelegate(null);
+                                }
+                                listAdapter.notifyItemChanged(answerSectionRow);
                             }
-                            holder = listView.findViewHolderForAdapterPosition(position - 1);
-                            if (holder != null && holder.itemView instanceof PollEditTextCell) {
-                                PollEditTextCell editTextCell = (PollEditTextCell) holder.itemView;
-                                editTextCell.getTextView().requestFocus();
-                            }
-                            checkDoneButton();
-                            updateRows();
-                            listAdapter.notifyItemChanged(answerSectionRow);
                         }
                     }) {
+                        @Override
+                        protected void onEditTextFocusChanged(boolean focused) {
+                            onCellFocusChanges(this, focused);
+                        }
+
                         @Override
                         protected boolean drawDivider() {
                             RecyclerView.ViewHolder holder = listView.findContainingViewHolder(this);
@@ -593,6 +1612,54 @@ public class PollCreateActivity extends BaseFragment {
                                 }
                             }
                             return true;
+                        }
+
+                        @Override
+                        protected boolean shouldShowCheckBox() {
+                            return quizPoll;
+                        }
+
+                        @Override
+                        protected void onCheckBoxClick(PollEditTextCell editText, boolean checked) {
+                            if (checked && quizPoll) {
+                                Arrays.fill(answersChecks, false);
+                                int count = listView.getChildCount();
+                                for (int a = answerStartRow; a < answerStartRow + answersCount; a++) {
+                                    RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(a);
+                                    if (holder != null && holder.itemView instanceof PollEditTextCell) {
+                                        PollEditTextCell pollEditTextCell = (PollEditTextCell) holder.itemView;
+                                        pollEditTextCell.setChecked(false, true);
+                                    }
+                                }
+                            }
+                            super.onCheckBoxClick(editText, checked);
+                            RecyclerView.ViewHolder holder = listView.findContainingViewHolder(editText);
+                            if (holder != null) {
+                                int position = holder.getAdapterPosition();
+                                if (position != RecyclerView.NO_POSITION) {
+                                    int index = position - answerStartRow;
+                                    answersChecks[index] = checked;
+                                }
+                            }
+                            checkDoneButton();
+                        }
+
+                        @Override
+                        protected boolean isChecked(PollEditTextCell editText) {
+                            RecyclerView.ViewHolder holder = listView.findContainingViewHolder(editText);
+                            if (holder != null) {
+                                int position = holder.getAdapterPosition();
+                                if (position != RecyclerView.NO_POSITION) {
+                                    int index = position - answerStartRow;
+                                    return answersChecks[index];
+                                }
+                            }
+                            return false;
+                        }
+
+                        @Override
+                        protected void onEmojiButtonClicked(PollEditTextCell cell1) {
+                            onEmojiClicked(cell1);
                         }
                     };
                     cell.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
@@ -616,7 +1683,25 @@ public class PollCreateActivity extends BaseFragment {
                                 if (index < 0 || index >= answers.length) {
                                     return;
                                 }
-                                answers[index] = s.toString();
+                                if (suggestEmojiPanel != null) {
+                                    ImageSpan[] spans = s.getSpans(0, s.length(), ImageSpan.class);
+                                    for (ImageSpan span : spans) {
+                                        s.removeSpan(span);
+                                    }
+                                    Emoji.replaceEmoji(s, cell.getEditField().getPaint().getFontMetricsInt(), false);
+                                    float y = holder.itemView.getY() - AndroidUtilities.dp(166) + holder.itemView.getMeasuredHeight();
+                                    if (y > 0) {
+                                        suggestEmojiPanel.setDirection(SuggestEmojiView.DIRECTION_TO_BOTTOM);
+                                        suggestEmojiPanel.setTranslationY(y);
+                                    } else {
+                                        suggestEmojiPanel.setDirection(SuggestEmojiView.DIRECTION_TO_TOP);
+                                        suggestEmojiPanel.setTranslationY(holder.itemView.getY());
+                                    }
+                                    suggestEmojiPanel.setDelegate(cell);
+                                    suggestEmojiPanel.fireUpdate();
+                                }
+
+                                answers[index] = s;
                                 setTextLeft(cell, index);
                                 checkDoneButton();
                             }
@@ -630,17 +1715,19 @@ public class PollCreateActivity extends BaseFragment {
                             RecyclerView.ViewHolder holder = listView.findContainingViewHolder(cell);
                             if (holder != null) {
                                 int position = holder.getAdapterPosition();
-                                int index = position - answerStartRow;
-                                if (index == answersCount - 1 && answersCount < 10) {
-                                    addNewField();
-                                } else {
-                                    if (index == answersCount - 1) {
-                                        AndroidUtilities.hideKeyboard(cell.getTextView());
+                                if (position != RecyclerView.NO_POSITION) {
+                                    int index = position - answerStartRow;
+                                    if (index == answersCount - 1 && answersCount < 10) {
+                                        addNewField();
                                     } else {
-                                        holder = listView.findViewHolderForAdapterPosition(position + 1);
-                                        if (holder != null && holder.itemView instanceof PollEditTextCell) {
-                                            PollEditTextCell editTextCell = (PollEditTextCell) holder.itemView;
-                                            editTextCell.getTextView().requestFocus();
+                                        if (index == answersCount - 1) {
+                                            AndroidUtilities.hideKeyboard(cell.getTextView());
+                                        } else {
+                                            holder = listView.findViewHolderForAdapterPosition(position + 1);
+                                            if (holder != null && holder.itemView instanceof PollEditTextCell) {
+                                                PollEditTextCell editTextCell = (PollEditTextCell) holder.itemView;
+                                                editTextCell.getTextView().requestFocus();
+                                            }
                                         }
                                     }
                                 }
@@ -667,16 +1754,20 @@ public class PollCreateActivity extends BaseFragment {
 
         @Override
         public int getItemViewType(int position) {
-            if (position == questionHeaderRow || position == answerHeaderRow) {
+            if (position == questionHeaderRow || position == answerHeaderRow || position == settingsHeaderRow) {
                 return 0;
             } else if (position == questionSectionRow) {
                 return 1;
-            } else if (position == answerSectionRow) {
+            } else if (position == answerSectionRow || position == settingsSectionRow || position == solutionInfoRow) {
                 return 2;
             } else if (position == addAnswerRow) {
                 return 3;
             } else if (position == questionRow) {
                 return 4;
+            } else if (position == solutionRow) {
+                return 7;
+            } else if (position == anonymousRow || position == multipleRow || position == quizRow) {
+                return 6;
             } else {
                 return 5;
             }
@@ -688,41 +1779,55 @@ public class PollCreateActivity extends BaseFragment {
             if (idx1 < 0 || idx2 < 0 || idx1 >= answersCount || idx2 >= answersCount) {
                 return;
             }
-            String from = answers[idx1];
+            CharSequence from = answers[idx1];
             answers[idx1] = answers[idx2];
             answers[idx2] = from;
+            boolean temp = answersChecks[idx1];
+            answersChecks[idx1] = answersChecks[idx2];
+            answersChecks[idx2] = temp;
             notifyItemMoved(fromIndex, toIndex);
         }
     }
 
     @Override
-    public ThemeDescription[] getThemeDescriptions() {
-        return new ThemeDescription[]{
-                new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR, new Class[]{HeaderCell.class, TextSettingsCell.class, PollEditTextCell.class}, null, null, null, Theme.key_windowBackgroundWhite),
-                new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundGray),
+    public ArrayList<ThemeDescription> getThemeDescriptions() {
+        ArrayList<ThemeDescription> themeDescriptions = new ArrayList<>();
 
-                new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault),
-                new ThemeDescription(listView, ThemeDescription.FLAG_LISTGLOWCOLOR, null, null, null, null, Theme.key_actionBarDefault),
-                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_actionBarDefaultIcon),
-                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_actionBarDefaultTitle),
-                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_actionBarDefaultSelector),
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR, new Class[]{HeaderCell.class, TextCell.class, PollEditTextCell.class, TextCheckCell.class}, null, null, null, Theme.key_windowBackgroundWhite));
+        themeDescriptions.add(new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundGray));
 
-                new ThemeDescription(listView, 0, new Class[]{HeaderCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlueHeader),
-                new ThemeDescription(listView, ThemeDescription.FLAG_CHECKTAG, new Class[]{HeaderCell.class}, new String[]{"textView2"}, null, null, null, Theme.key_windowBackgroundWhiteRedText5),
-                new ThemeDescription(listView, ThemeDescription.FLAG_CHECKTAG, new Class[]{HeaderCell.class}, new String[]{"textView2"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText3),
+        themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_LISTGLOWCOLOR, null, null, null, null, Theme.key_actionBarDefault));
+        themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_actionBarDefaultIcon));
+        themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_actionBarDefaultTitle));
+        themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_actionBarDefaultSelector));
 
-                new ThemeDescription(listView, ThemeDescription.FLAG_TEXTCOLOR, new Class[]{PollEditTextCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
-                new ThemeDescription(listView, ThemeDescription.FLAG_HINTTEXTCOLOR, new Class[]{PollEditTextCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteHintText),
-                new ThemeDescription(listView, ThemeDescription.FLAG_HINTTEXTCOLOR, new Class[]{PollEditTextCell.class}, new String[]{"deleteImageView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText),
-                new ThemeDescription(listView, ThemeDescription.FLAG_USEBACKGROUNDDRAWABLE | ThemeDescription.FLAG_DRAWABLESELECTEDSTATE, new Class[]{PollEditTextCell.class}, new String[]{"deleteImageView"}, null, null, null, Theme.key_stickers_menuSelector),
-                new ThemeDescription(listView, ThemeDescription.FLAG_CHECKTAG, new Class[]{PollEditTextCell.class}, new String[]{"textView2"}, null, null, null, Theme.key_windowBackgroundWhiteRedText5),
-                new ThemeDescription(listView, ThemeDescription.FLAG_CHECKTAG, new Class[]{PollEditTextCell.class}, new String[]{"textView2"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText3),
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{HeaderCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlueHeader));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CHECKTAG, new Class[]{HeaderCell.class}, new String[]{"textView2"}, null, null, null, Theme.key_text_RedRegular));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CHECKTAG, new Class[]{HeaderCell.class}, new String[]{"textView2"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText3));
 
-                new ThemeDescription(listView, ThemeDescription.FLAG_SELECTOR, null, null, null, null, Theme.key_listSelector),
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_TEXTCOLOR, new Class[]{PollEditTextCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_HINTTEXTCOLOR, new Class[]{PollEditTextCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteHintText));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_HINTTEXTCOLOR, new Class[]{PollEditTextCell.class}, new String[]{"deleteImageView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayIcon));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_HINTTEXTCOLOR, new Class[]{PollEditTextCell.class}, new String[]{"moveImageView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayIcon));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_USEBACKGROUNDDRAWABLE | ThemeDescription.FLAG_DRAWABLESELECTEDSTATE, new Class[]{PollEditTextCell.class}, new String[]{"deleteImageView"}, null, null, null, Theme.key_stickers_menuSelector));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CHECKTAG, new Class[]{PollEditTextCell.class}, new String[]{"textView2"}, null, null, null, Theme.key_text_RedRegular));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{PollEditTextCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_windowBackgroundWhiteGrayIcon));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{PollEditTextCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_checkboxCheck));
 
-                new ThemeDescription(listView, 0, new Class[]{View.class}, Theme.dividerPaint, null, null, Theme.key_divider),
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText2));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrack));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackChecked));
 
-                new ThemeDescription(listView, 0, new Class[]{TextSettingsCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteHintText),
-        };
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_SELECTOR, null, null, null, null, Theme.key_listSelector));
+
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{View.class}, Theme.dividerPaint, null, null, Theme.key_divider));
+
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlueText4));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_BACKGROUNDFILTER, new Class[]{TextCell.class}, new String[]{"imageView"}, null, null, null, Theme.key_switchTrackChecked));
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCell.class}, new String[]{"imageView"}, null, null, null, Theme.key_checkboxCheck));
+
+        return themeDescriptions;
     }
 }

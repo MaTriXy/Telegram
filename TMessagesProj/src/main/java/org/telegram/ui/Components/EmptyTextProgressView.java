@@ -16,6 +16,8 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
@@ -25,38 +27,80 @@ import org.telegram.ui.ActionBar.Theme;
 
 public class EmptyTextProgressView extends FrameLayout {
 
+    private final Theme.ResourcesProvider resourcesProvider;
     private TextView textView;
-    private RadialProgressView progressBar;
+    private LinearLayout textViewLayout;
+    private View progressView;
+    private RLottieImageView lottieImageView;
     private boolean inLayout;
-    private boolean showAtCenter;
+    private int showAtPos;
 
     public EmptyTextProgressView(Context context) {
-        super(context);
+        this(context, null, null);
+    }
 
-        progressBar = new RadialProgressView(context);
-        progressBar.setVisibility(INVISIBLE);
-        addView(progressBar, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+    public EmptyTextProgressView(Context context, View progressView) {
+        this(context, progressView, null);
+    }
+
+    public EmptyTextProgressView(Context context, View progressView, Theme.ResourcesProvider resourcesProvider) {
+        super(context);
+        this.resourcesProvider = resourcesProvider;
+
+        if (progressView == null) {
+            progressView = new RadialProgressView(context);
+            addView(progressView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        } else {
+            addView(progressView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        }
+        this.progressView = progressView;
+
+        textViewLayout = new LinearLayout(context);
+        textViewLayout.setPadding(AndroidUtilities.dp(20), 0, AndroidUtilities.dp(20), 0);
+        textViewLayout.setGravity(Gravity.CENTER_HORIZONTAL);
+        textViewLayout.setClipChildren(false);
+        textViewLayout.setClipToPadding(false);
+        textViewLayout.setOrientation(LinearLayout.VERTICAL);
+
+        lottieImageView = new RLottieImageView(context);
+        lottieImageView.setScaleType(ImageView.ScaleType.FIT_XY);
+        lottieImageView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        lottieImageView.setVisibility(GONE);
+//        lottieImageView.setOnClickListener(v -> {
+//            if (!lottieImageView.isPlaying()) {
+//                lottieImageView.setProgress(0.0f);
+//                lottieImageView.playAnimation();
+//            }
+//        });
+        textViewLayout.addView(lottieImageView, LayoutHelper.createLinear(150, 150, Gravity.CENTER, 0, 0, 0, 20));
 
         textView = new TextView(context);
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
-        textView.setTextColor(Theme.getColor(Theme.key_emptyListPlaceholder));
-        textView.setGravity(Gravity.CENTER);
-        textView.setVisibility(INVISIBLE);
-        textView.setPadding(AndroidUtilities.dp(20), 0, AndroidUtilities.dp(20), 0);
-        textView.setText(LocaleController.getString("NoResult", R.string.NoResult));
-        addView(textView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        textView.setTextColor(getThemedColor(Theme.key_emptyListPlaceholder));
+        textView.setGravity(Gravity.CENTER_HORIZONTAL);
+        textView.setText(LocaleController.getString(R.string.NoResult));
+        textViewLayout.addView(textView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
+
+        addView(textViewLayout, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+
+        AndroidUtilities.updateViewVisibilityAnimated(textView, false, 2f, false);
+        AndroidUtilities.updateViewVisibilityAnimated(progressView, false, 1f, false);
 
         setOnTouchListener((v, event) -> true);
     }
 
     public void showProgress() {
-        textView.setVisibility(INVISIBLE);
-        progressBar.setVisibility(VISIBLE);
+        showProgress(true);
+    }
+
+    public void showProgress(boolean animated) {
+        AndroidUtilities.updateViewVisibilityAnimated(textView, false, 0.9f, animated);
+        AndroidUtilities.updateViewVisibilityAnimated(progressView, true, 1f, animated);
     }
 
     public void showTextView() {
-        textView.setVisibility(VISIBLE);
-        progressBar.setVisibility(INVISIBLE);
+        AndroidUtilities.updateViewVisibilityAnimated(textView, true, 0.9f, true);
+        AndroidUtilities.updateViewVisibilityAnimated(progressView, false, 1f, true);
     }
 
     public void setText(String text) {
@@ -67,8 +111,18 @@ public class EmptyTextProgressView extends FrameLayout {
         textView.setTextColor(color);
     }
 
+    public void setLottie(int resource, int w, int h) {
+        lottieImageView.setVisibility(resource != 0 ? VISIBLE : GONE);
+        if (resource != 0) {
+            lottieImageView.setAnimation(resource, w, h);
+            lottieImageView.playAnimation();
+        }
+    }
+
     public void setProgressBarColor(int color) {
-        progressBar.setProgressColor(color);
+        if (progressView instanceof RadialProgressView) {
+            ((RadialProgressView) progressView).setProgressColor(color);
+        }
     }
 
     public void setTopImage(int resId) {
@@ -77,7 +131,7 @@ public class EmptyTextProgressView extends FrameLayout {
         } else {
             Drawable drawable = getContext().getResources().getDrawable(resId).mutate();
             if (drawable != null) {
-                drawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_emptyListPlaceholder), PorterDuff.Mode.MULTIPLY));
+                drawable.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_emptyListPlaceholder), PorterDuff.Mode.MULTIPLY));
             }
             textView.setCompoundDrawablesWithIntrinsicBounds(null, drawable, null, null);
             textView.setCompoundDrawablePadding(AndroidUtilities.dp(1));
@@ -89,7 +143,11 @@ public class EmptyTextProgressView extends FrameLayout {
     }
 
     public void setShowAtCenter(boolean value) {
-        showAtCenter = value;
+        showAtPos = value ? 1 : 0;
+    }
+
+    public void setShowAtTop(boolean value) {
+        showAtPos = value ? 2 : 0;
     }
 
     @Override
@@ -107,10 +165,16 @@ public class EmptyTextProgressView extends FrameLayout {
 
             int x = (width - child.getMeasuredWidth()) / 2;
             int y;
-            if (showAtCenter) {
-                y = (height / 2 - child.getMeasuredHeight()) / 2;
+            if (child == progressView && progressView instanceof FlickerLoadingView) {
+                y = (height - child.getMeasuredHeight()) / 2 + getPaddingTop();
             } else {
-                y = (height - child.getMeasuredHeight()) / 2;
+                if (showAtPos == 2) {
+                    y = (AndroidUtilities.dp(100) - child.getMeasuredHeight()) / 2 + getPaddingTop();
+                } else if (showAtPos == 1) {
+                    y = (height / 2 - child.getMeasuredHeight()) / 2 + getPaddingTop();
+                } else {
+                    y = (height - child.getMeasuredHeight()) / 2 + getPaddingTop();
+                }
             }
             child.layout(x, y, x + child.getMeasuredWidth(), y + child.getMeasuredHeight());
         }
@@ -127,5 +191,9 @@ public class EmptyTextProgressView extends FrameLayout {
     @Override
     public boolean hasOverlappingRendering() {
         return false;
+    }
+
+    private int getThemedColor(int key) {
+        return Theme.getColor(key, resourcesProvider);
     }
 }

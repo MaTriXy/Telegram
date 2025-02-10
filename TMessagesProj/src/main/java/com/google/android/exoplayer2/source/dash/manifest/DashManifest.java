@@ -20,6 +20,7 @@ import androidx.annotation.Nullable;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.offline.FilterableManifest;
 import com.google.android.exoplayer2.offline.StreamKey;
+import com.google.android.exoplayer2.util.Util;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedList;
@@ -42,14 +43,10 @@ public class DashManifest implements FilterableManifest<DashManifest> {
    */
   public final long durationMs;
 
-  /**
-   * The {@code minBufferTime} value in milliseconds, or {@link C#TIME_UNSET} if not present.
-   */
+  /** The {@code minBufferTime} value in milliseconds, or {@link C#TIME_UNSET} if not present. */
   public final long minBufferTimeMs;
 
-  /**
-   * Whether the manifest has value "dynamic" for the {@code type} attribute.
-   */
+  /** Whether the manifest has value "dynamic" for the {@code type} attribute. */
   public final boolean dynamic;
 
   /**
@@ -59,8 +56,7 @@ public class DashManifest implements FilterableManifest<DashManifest> {
   public final long minUpdatePeriodMs;
 
   /**
-   * The {@code timeShiftBufferDepth} value in milliseconds, or {@link C#TIME_UNSET} if not
-   * present.
+   * The {@code timeShiftBufferDepth} value in milliseconds, or {@link C#TIME_UNSET} if not present.
    */
   public final long timeShiftBufferDepthMs;
 
@@ -71,8 +67,8 @@ public class DashManifest implements FilterableManifest<DashManifest> {
   public final long suggestedPresentationDelayMs;
 
   /**
-   * The {@code publishTime} value in milliseconds since epoch, or {@link C#TIME_UNSET} if
-   * not present.
+   * The {@code publishTime} value in milliseconds since epoch, or {@link C#TIME_UNSET} if not
+   * present.
    */
   public final long publishTimeMs;
 
@@ -80,49 +76,18 @@ public class DashManifest implements FilterableManifest<DashManifest> {
    * The {@link UtcTimingElement}, or null if not present. Defined in DVB A168:7/2016, Section
    * 4.7.2.
    */
-  public final UtcTimingElement utcTiming;
+  @Nullable public final UtcTimingElement utcTiming;
 
-  /**
-   * The location of this manifest.
-   */
-  public final Uri location;
+  /** The {@link ServiceDescriptionElement}, or null if not present. */
+  @Nullable public final ServiceDescriptionElement serviceDescription;
+
+  /** The location of this manifest, or null if not present. */
+  @Nullable public final Uri location;
 
   /** The {@link ProgramInformation}, or null if not present. */
   @Nullable public final ProgramInformation programInformation;
 
   private final List<Period> periods;
-
-  /**
-   * @deprecated Use {@link #DashManifest(long, long, long, boolean, long, long, long, long,
-   *     ProgramInformation, UtcTimingElement, Uri, List)}.
-   */
-  @Deprecated
-  public DashManifest(
-      long availabilityStartTimeMs,
-      long durationMs,
-      long minBufferTimeMs,
-      boolean dynamic,
-      long minUpdatePeriodMs,
-      long timeShiftBufferDepthMs,
-      long suggestedPresentationDelayMs,
-      long publishTimeMs,
-      UtcTimingElement utcTiming,
-      Uri location,
-      List<Period> periods) {
-    this(
-        availabilityStartTimeMs,
-        durationMs,
-        minBufferTimeMs,
-        dynamic,
-        minUpdatePeriodMs,
-        timeShiftBufferDepthMs,
-        suggestedPresentationDelayMs,
-        publishTimeMs,
-        /* programInformation= */ null,
-        utcTiming,
-        location,
-        periods);
-  }
 
   public DashManifest(
       long availabilityStartTimeMs,
@@ -134,8 +99,9 @@ public class DashManifest implements FilterableManifest<DashManifest> {
       long suggestedPresentationDelayMs,
       long publishTimeMs,
       @Nullable ProgramInformation programInformation,
-      UtcTimingElement utcTiming,
-      Uri location,
+      @Nullable UtcTimingElement utcTiming,
+      @Nullable ServiceDescriptionElement serviceDescription,
+      @Nullable Uri location,
       List<Period> periods) {
     this.availabilityStartTimeMs = availabilityStartTimeMs;
     this.durationMs = durationMs;
@@ -148,6 +114,7 @@ public class DashManifest implements FilterableManifest<DashManifest> {
     this.programInformation = programInformation;
     this.utcTiming = utcTiming;
     this.location = location;
+    this.serviceDescription = serviceDescription;
     this.periods = periods == null ? Collections.emptyList() : periods;
   }
 
@@ -166,7 +133,7 @@ public class DashManifest implements FilterableManifest<DashManifest> {
   }
 
   public final long getPeriodDurationUs(int index) {
-    return C.msToUs(getPeriodDurationMs(index));
+    return Util.msToUs(getPeriodDurationMs(index));
   }
 
   @Override
@@ -188,8 +155,9 @@ public class DashManifest implements FilterableManifest<DashManifest> {
         Period period = getPeriod(periodIndex);
         ArrayList<AdaptationSet> copyAdaptationSets =
             copyAdaptationSets(period.adaptationSets, keys);
-        Period copiedPeriod = new Period(period.id, period.startMs - shiftMs, copyAdaptationSets,
-            period.eventStreams);
+        Period copiedPeriod =
+            new Period(
+                period.id, period.startMs - shiftMs, copyAdaptationSets, period.eventStreams);
         copyPeriods.add(copiedPeriod);
       }
     }
@@ -205,6 +173,7 @@ public class DashManifest implements FilterableManifest<DashManifest> {
         publishTimeMs,
         programInformation,
         utcTiming,
+        serviceDescription,
         location,
         copyPeriods);
   }
@@ -221,18 +190,22 @@ public class DashManifest implements FilterableManifest<DashManifest> {
       List<Representation> representations = adaptationSet.representations;
       ArrayList<Representation> copyRepresentations = new ArrayList<>();
       do {
-        Representation representation = representations.get(key.trackIndex);
+        Representation representation = representations.get(key.streamIndex);
         copyRepresentations.add(representation);
         key = keys.poll();
       } while (key.periodIndex == periodIndex && key.groupIndex == adaptationSetIndex);
 
-      copyAdaptationSets.add(new AdaptationSet(adaptationSet.id, adaptationSet.type,
-          copyRepresentations, adaptationSet.accessibilityDescriptors,
-          adaptationSet.supplementalProperties));
-    } while(key.periodIndex == periodIndex);
+      copyAdaptationSets.add(
+          new AdaptationSet(
+              adaptationSet.id,
+              adaptationSet.type,
+              copyRepresentations,
+              adaptationSet.accessibilityDescriptors,
+              adaptationSet.essentialProperties,
+              adaptationSet.supplementalProperties));
+    } while (key.periodIndex == periodIndex);
     // Add back the last key which doesn't belong to the period being processed
     keys.addFirst(key);
     return copyAdaptationSets;
   }
-
 }

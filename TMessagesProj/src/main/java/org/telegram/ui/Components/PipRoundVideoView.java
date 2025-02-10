@@ -77,13 +77,19 @@ public class PipRoundVideoView implements NotificationCenter.NotificationCenterD
     @SuppressLint("StaticFieldLeak")
     private static PipRoundVideoView instance;
 
+    public class PipFrameLayout extends FrameLayout {
+        public PipFrameLayout(Context context) {
+            super(context);
+        }
+    }
+
     public void show(Activity activity, Runnable closeRunnable) {
         if (activity == null) {
             return;
         }
         instance = this;
         onCloseRunnable = closeRunnable;
-        windowView = new FrameLayout(activity) {
+        windowView = new PipFrameLayout(activity) {
 
             private float startX;
             private float startY;
@@ -256,6 +262,9 @@ public class PipRoundVideoView implements NotificationCenter.NotificationCenterD
         windowView.setScaleY(0.8f);
 
         textureView = new TextureView(activity);
+        float scale = (AndroidUtilities.dpf2(120) + AndroidUtilities.dpf2(2)) / AndroidUtilities.dpf2(120);
+        textureView.setScaleX(scale);
+        textureView.setScaleY(scale);
         aspectRatioFrameLayout.addView(textureView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         imageView = new ImageView(activity);
@@ -281,6 +290,7 @@ public class PipRoundVideoView implements NotificationCenter.NotificationCenterD
             windowLayoutParams.gravity = Gravity.TOP | Gravity.LEFT;
             windowLayoutParams.type = WindowManager.LayoutParams.LAST_APPLICATION_WINDOW;
             windowLayoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+            AndroidUtilities.setPreferredMaxRefreshRate(windowManager, windowView, windowLayoutParams);
             windowManager.addView(windowView, windowLayoutParams);
         } catch (Exception e) {
             FileLog.e(e);
@@ -519,10 +529,12 @@ public class PipRoundVideoView implements NotificationCenter.NotificationCenterD
         }
     }
 
+    @Keep
     public int getX() {
         return windowLayoutParams.x;
     }
 
+    @Keep
     public int getY() {
         return windowLayoutParams.y;
     }

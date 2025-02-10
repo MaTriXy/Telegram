@@ -17,6 +17,8 @@ package com.google.android.exoplayer2.drm;
 
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.text.TextUtils;
+import androidx.annotation.CheckResult;
 import androidx.annotation.Nullable;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.drm.DrmInitData.SchemeData;
@@ -28,9 +30,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Initialization data for one or more DRM schemes.
- */
+/** Initialization data for one or more DRM schemes. */
 public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
 
   /**
@@ -52,7 +52,8 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
    * @param mediaData DRM session acquisition data obtained from the media.
    * @return A {@link DrmInitData} obtained from merging a media manifest and a media stream.
    */
-  public static @Nullable DrmInitData createSessionCreationData(
+  @Nullable
+  public static DrmInitData createSessionCreationData(
       @Nullable DrmInitData manifestData, @Nullable DrmInitData mediaData) {
     ArrayList<SchemeData> result = new ArrayList<>();
     String schemeType = null;
@@ -86,11 +87,9 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
   private int hashCode;
 
   /** The protection scheme type, or null if not applicable or unknown. */
-  public final @Nullable String schemeType;
+  @Nullable public final String schemeType;
 
-  /**
-   * Number of {@link SchemeData}s.
-   */
+  /** Number of {@link SchemeData}s. */
   public final int schemeDataCount;
 
   /**
@@ -123,8 +122,8 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
     this(schemeType, true, schemeDatas);
   }
 
-  private DrmInitData(@Nullable String schemeType, boolean cloneSchemeDatas,
-      SchemeData... schemeDatas) {
+  private DrmInitData(
+      @Nullable String schemeType, boolean cloneSchemeDatas, SchemeData... schemeDatas) {
     this.schemeType = schemeType;
     if (cloneSchemeDatas) {
       schemeDatas = schemeDatas.clone();
@@ -138,25 +137,8 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
 
   /* package */ DrmInitData(Parcel in) {
     schemeType = in.readString();
-    schemeDatas = in.createTypedArray(SchemeData.CREATOR);
+    schemeDatas = Util.castNonNull(in.createTypedArray(SchemeData.CREATOR));
     schemeDataCount = schemeDatas.length;
-  }
-
-  /**
-   * Retrieves data for a given DRM scheme, specified by its UUID.
-   *
-   * @deprecated Use {@link #get(int)} and {@link SchemeData#matches(UUID)} instead.
-   * @param uuid The DRM scheme's UUID.
-   * @return The initialization data for the scheme, or null if the scheme is not supported.
-   */
-  @Deprecated
-  public @Nullable SchemeData get(UUID uuid) {
-    for (SchemeData schemeData : schemeDatas) {
-      if (schemeData.matches(uuid)) {
-        return schemeData;
-      }
-    }
-    return null;
   }
 
   /**
@@ -175,11 +157,31 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
    * @param schemeType A protection scheme type. May be null.
    * @return A copy with the specified protection scheme type.
    */
+  @CheckResult
   public DrmInitData copyWithSchemeType(@Nullable String schemeType) {
     if (Util.areEqual(this.schemeType, schemeType)) {
       return this;
     }
     return new DrmInitData(schemeType, false, schemeDatas);
+  }
+
+  /**
+   * Returns an instance containing the {@link #schemeDatas} from both this and {@code other}. The
+   * {@link #schemeType} of the instances being merged must either match, or at least one scheme
+   * type must be {@code null}.
+   *
+   * @param drmInitData The instance to merge.
+   * @return The merged result.
+   */
+  public DrmInitData merge(DrmInitData drmInitData) {
+    Assertions.checkState(
+        schemeType == null
+            || drmInitData.schemeType == null
+            || TextUtils.equals(schemeType, drmInitData.schemeType));
+    String mergedSchemeType = schemeType != null ? this.schemeType : drmInitData.schemeType;
+    SchemeData[] mergedSchemeDatas =
+        Util.nullSafeArrayConcatenation(schemeDatas, drmInitData.schemeDatas);
+    return new DrmInitData(mergedSchemeType, mergedSchemeDatas);
   }
 
   @Override
@@ -207,7 +209,8 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
 
   @Override
   public int compare(SchemeData first, SchemeData second) {
-    return C.UUID_NIL.equals(first.uuid) ? (C.UUID_NIL.equals(second.uuid) ? 0 : 1)
+    return C.UUID_NIL.equals(first.uuid)
+        ? (C.UUID_NIL.equals(second.uuid) ? 0 : 1)
         : first.uuid.compareTo(second.uuid);
   }
 
@@ -227,17 +230,16 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
   public static final Parcelable.Creator<DrmInitData> CREATOR =
       new Parcelable.Creator<DrmInitData>() {
 
-    @Override
-    public DrmInitData createFromParcel(Parcel in) {
-      return new DrmInitData(in);
-    }
+        @Override
+        public DrmInitData createFromParcel(Parcel in) {
+          return new DrmInitData(in);
+        }
 
-    @Override
-    public DrmInitData[] newArray(int size) {
-      return new DrmInitData[size];
-    }
-
-  };
+        @Override
+        public DrmInitData[] newArray(int size) {
+          return new DrmInitData[size];
+        }
+      };
 
   // Internal methods.
 
@@ -251,9 +253,7 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
     return false;
   }
 
-  /**
-   * Scheme initialization data.
-   */
+  /** Scheme initialization data. */
   public static final class SchemeData implements Parcelable {
 
     // Lazily initialized hashcode.
@@ -263,17 +263,13 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
      * The {@link UUID} of the DRM scheme, or {@link C#UUID_NIL} if the data is universal (i.e.
      * applies to all schemes).
      */
-    private final UUID uuid;
+    public final UUID uuid;
     /** The URL of the server to which license requests should be made. May be null if unknown. */
-    public final @Nullable String licenseServerUrl;
+    @Nullable public final String licenseServerUrl;
     /** The mimeType of {@link #data}. */
     public final String mimeType;
     /** The initialization data. May be null for scheme support checks only. */
-    public final @Nullable byte[] data;
-    /**
-     * Whether secure decryption is required.
-     */
-    public final boolean requiresSecureDecryption;
+    @Nullable public final byte[] data;
 
     /**
      * @param uuid The {@link UUID} of the DRM scheme, or {@link C#UUID_NIL} if the data is
@@ -282,19 +278,7 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
      * @param data See {@link #data}.
      */
     public SchemeData(UUID uuid, String mimeType, @Nullable byte[] data) {
-      this(uuid, mimeType, data, false);
-    }
-
-    /**
-     * @param uuid The {@link UUID} of the DRM scheme, or {@link C#UUID_NIL} if the data is
-     *     universal (i.e. applies to all schemes).
-     * @param mimeType See {@link #mimeType}.
-     * @param data See {@link #data}.
-     * @param requiresSecureDecryption See {@link #requiresSecureDecryption}.
-     */
-    public SchemeData(
-        UUID uuid, String mimeType, @Nullable byte[] data, boolean requiresSecureDecryption) {
-      this(uuid, /* licenseServerUrl= */ null, mimeType, data, requiresSecureDecryption);
+      this(uuid, /* licenseServerUrl= */ null, mimeType, data);
     }
 
     /**
@@ -303,19 +287,13 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
      * @param licenseServerUrl See {@link #licenseServerUrl}.
      * @param mimeType See {@link #mimeType}.
      * @param data See {@link #data}.
-     * @param requiresSecureDecryption See {@link #requiresSecureDecryption}.
      */
     public SchemeData(
-        UUID uuid,
-        @Nullable String licenseServerUrl,
-        String mimeType,
-        @Nullable byte[] data,
-        boolean requiresSecureDecryption) {
+        UUID uuid, @Nullable String licenseServerUrl, String mimeType, @Nullable byte[] data) {
       this.uuid = Assertions.checkNotNull(uuid);
       this.licenseServerUrl = licenseServerUrl;
       this.mimeType = Assertions.checkNotNull(mimeType);
       this.data = data;
-      this.requiresSecureDecryption = requiresSecureDecryption;
     }
 
     /* package */ SchemeData(Parcel in) {
@@ -323,7 +301,6 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
       licenseServerUrl = in.readString();
       mimeType = Util.castNonNull(in.readString());
       data = in.createByteArray();
-      requiresSecureDecryption = in.readByte() != 0;
     }
 
     /**
@@ -346,9 +323,7 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
       return hasData() && !other.hasData() && matches(other.uuid);
     }
 
-    /**
-     * Returns whether {@link #data} is non-null.
-     */
+    /** Returns whether {@link #data} is non-null. */
     public boolean hasData() {
       return data != null;
     }
@@ -359,8 +334,9 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
      * @param data The data to include in the copy.
      * @return The new instance.
      */
+    @CheckResult
     public SchemeData copyWithData(@Nullable byte[] data) {
-      return new SchemeData(uuid, licenseServerUrl, mimeType, data, requiresSecureDecryption);
+      return new SchemeData(uuid, licenseServerUrl, mimeType, data);
     }
 
     @Override
@@ -404,25 +380,20 @@ public final class DrmInitData implements Comparator<SchemeData>, Parcelable {
       dest.writeString(licenseServerUrl);
       dest.writeString(mimeType);
       dest.writeByteArray(data);
-      dest.writeByte((byte) (requiresSecureDecryption ? 1 : 0));
     }
 
-    @SuppressWarnings("hiding")
     public static final Parcelable.Creator<SchemeData> CREATOR =
         new Parcelable.Creator<SchemeData>() {
 
-      @Override
-      public SchemeData createFromParcel(Parcel in) {
-        return new SchemeData(in);
-      }
+          @Override
+          public SchemeData createFromParcel(Parcel in) {
+            return new SchemeData(in);
+          }
 
-      @Override
-      public SchemeData[] newArray(int size) {
-        return new SchemeData[size];
-      }
-
-    };
-
+          @Override
+          public SchemeData[] newArray(int size) {
+            return new SchemeData[size];
+          }
+        };
   }
-
 }

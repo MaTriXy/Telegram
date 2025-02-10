@@ -11,10 +11,13 @@ package org.telegram.ui.Components;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.RectF;
+import android.util.Log;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.ui.Components.voip.CellFlickerDrawable;
 
 public class LineProgressView extends View {
 
@@ -30,6 +33,10 @@ public class LineProgressView extends View {
 
     private static DecelerateInterpolator decelerateInterpolator;
     private static Paint progressPaint;
+
+    private RectF rect = new RectF();
+
+    CellFlickerDrawable cellFlickerDrawable;
 
     public LineProgressView(Context context) {
         super(context);
@@ -104,12 +111,27 @@ public class LineProgressView extends View {
             progressPaint.setColor(backColor);
             progressPaint.setAlpha((int) (255 * animatedAlphaValue));
             int start = (int) (getWidth() * animatedProgressValue);
-            canvas.drawRect(start, 0, getWidth(), getHeight(), progressPaint);
+            rect.set(0, 0, getWidth(), getHeight());
+            canvas.drawRoundRect(rect, getHeight() / 2f, getHeight() / 2f, progressPaint);
         }
 
         progressPaint.setColor(progressColor);
-        progressPaint.setAlpha((int)(255 * animatedAlphaValue));
-        canvas.drawRect(0, 0, getWidth() * animatedProgressValue, getHeight(), progressPaint);
+        progressPaint.setAlpha((int) (255 * animatedAlphaValue));
+        rect.set(0, 0, getWidth() * animatedProgressValue, getHeight());
+        canvas.drawRoundRect(rect, getHeight() / 2f, getHeight() / 2f, progressPaint);
+
+        if (animatedAlphaValue > 0) {
+            if (cellFlickerDrawable == null) {
+                cellFlickerDrawable = new CellFlickerDrawable(160, 0);
+                cellFlickerDrawable.drawFrame = false;
+                cellFlickerDrawable.animationSpeedScale = 0.8f;
+                cellFlickerDrawable.repeatProgress = 1.2f;
+            }
+            cellFlickerDrawable.setParentWidth(getMeasuredWidth());
+            cellFlickerDrawable.draw(canvas, rect, getHeight() / 2f, null);
+            invalidate();
+        }
+
         updateAnimation();
     }
 }

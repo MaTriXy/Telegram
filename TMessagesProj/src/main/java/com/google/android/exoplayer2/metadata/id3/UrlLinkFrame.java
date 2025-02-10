@@ -22,12 +22,10 @@ import android.os.Parcelable;
 import androidx.annotation.Nullable;
 import com.google.android.exoplayer2.util.Util;
 
-/**
- * Url link ID3 frame.
- */
+/** Url link ID3 frame. */
 public final class UrlLinkFrame extends Id3Frame {
 
-  public final @Nullable String description;
+  @Nullable public final String description;
   public final String url;
 
   public UrlLinkFrame(String id, @Nullable String description, String url) {
@@ -51,7 +49,8 @@ public final class UrlLinkFrame extends Id3Frame {
       return false;
     }
     UrlLinkFrame other = (UrlLinkFrame) obj;
-    return id.equals(other.id) && Util.areEqual(description, other.description)
+    return id.equals(other.id)
+        && Util.areEqual(description, other.description)
         && Util.areEqual(url, other.url);
   }
 
@@ -90,7 +89,5 @@ public final class UrlLinkFrame extends Id3Frame {
         public UrlLinkFrame[] newArray(int size) {
           return new UrlLinkFrame[size];
         }
-
       };
-
 }
